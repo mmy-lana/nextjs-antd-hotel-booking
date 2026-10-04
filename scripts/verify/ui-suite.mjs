@@ -124,6 +124,139 @@ try {
     assertTrue(cssHrefCount > 0, 'stylesheet links are emitted by the App Router shell');
   });
 
+  /* ------------------------------------------------------------------ */
+  suite('Phase 2 — atomic UI primitives');
+
+  testAsync('LuxuryPriceTag renders formatted currency with unit and comparison rate', async () => {
+    await page.goto(`${server.origin}/`);
+    await page.waitForSelector('[data-testid="luxury-price-tag"]');
+
+    const tags = await page.evaluate(`
+      return [...document.querySelectorAll('[data-testid="luxury-price-tag"]')].map((node) => ({
+        text: node.innerText.replace(/\s+/g, ' ').trim(),
+        fontFamily: window.getComputedStyle(node.querySelector('.resort-display')).fontFamily,
+      }));
+    `);
+    assertSame(tags.length, 4, 'every suite shows one price tag');
+    // `innerText` reflects CSS `text-transform`, so the tracked prefix renders uppercase,
+    // and it preserves the block line breaks between the typographic elements.
+    assertEqual(
+      tags[0].text.split('\n').map((line) => line.trim()).filter(Boolean),
+      ['FROM', '$1,250', '$1,450', '/ night', 'Weekend rate \u00b7 280 m\u00b2 \u00b7 Panoramic Cliff'],
+      'the tag renders prefix, rate, comparison rate, unit and note as distinct elements',
+    );
+
+    const amounts = tags.map((tag) => Number(tag.text.match(/\$([\d,]+)/)[1].replace(/,/g, '')));
+    assertEqual(amounts, [1250, 980, 720, 2800], 'each suite renders its own base rate');
+
+    for (const tag of tags) {
+      assertMatch(tag.fontFamily, /Didot|Cormorant|Georgia|serif/i, 'prices use the display serif stack');
+    }
+  });
+
+  testAsync('StatusBadge renders the shared room status vocabulary', async () => {
+    await page.goto(`${server.origin}/`);
+    await page.waitForSelector('[data-testid="status-badge"]');
+
+    const badges = await page.evaluate(`
+      return [...document.querySelectorAll('[data-testid="status-badge"]')].map((node) => ({
+        label: node.innerText.trim(),
+        tone: node.dataset.tone,
+        letterSpacing: window.getComputedStyle(node.querySelector('.ant-tag')).letterSpacing,
+        uppercase: window.getComputedStyle(node.querySelector('.ant-tag')).textTransform,
+      }));
+    `);
+    assertSame(badges.length, 4, 'every suite carries a status badge');
+    for (const badge of badges) {
+      assertMatch(badge.label, /^Available$/i, 'seeded suites are available');
+      assertSame(badge.tone, 'success', 'available maps to the success tone');
+      assertSame(badge.uppercase, 'uppercase', 'badge labels are set in small caps');
+      assertTrue(Number.parseFloat(badge.letterSpacing) >= 0.6, 'badge labels carry tracked letter spacing');
+    }
+  });
+
+  testAsync('AmenityIcon draws distinct stroke-only glyphs for every seeded amenity', async () => {
+    await page.goto(`${server.origin}/`);
+    await page.waitForSelector('[data-testid="amenity-icon"]');
+
+    const icons = await page.evaluate(`
+      return [...document.querySelectorAll('[data-testid="amenity-icon"]')].map((node) => ({
+        key: node.dataset.icon,
+        paths: node.querySelectorAll('path').length,
+        box: node.getBoundingClientRect().width,
+        hidden: node.getAttribute('aria-hidden'),
+        role: node.getAttribute('role'),
+        strokeWidth: node.querySelector('path') ? window.getComputedStyle(node.querySelector('path')).strokeWidth : null,
+      }));
+    `);
+    assertSame(icons.length, 11, 'each suite surfaces up to three amenity glyphs');
+
+    const distinctGlyphs = [...new Set(icons.map((icon) => icon.key))].sort();
+    assertEqual(
+      distinctGlyphs,
+      ['coffee', 'concierge', 'eye', 'fire', 'key', 'kitchen', 'lotus', 'ocean', 'pool', 'wine'],
+      'every seeded amenity icon key resolves to its own hand-drawn glyph',
+    );
+
+    for (const icon of icons) {
+      assertTrue(icon.paths > 0, `glyph ${icon.key} draws at least one path`);
+      assertTrue(icon.box >= 12, `glyph ${icon.key} renders at a legible size`);
+      assertSame(icon.hidden, 'true', 'decorative glyphs are hidden from assistive technology');
+      assertSame(icon.role, null, 'decorative glyphs do not claim the img role');
+      assertTrue(Number.parseFloat(icon.strokeWidth) > 0, `glyph ${icon.key} is stroked`);
+    }
+  });
+
+  testAsync('SectionHeader renders the editorial eyebrow, serif title and lede', async () => {
+    await page.goto(`${server.origin}/`);
+    await page.waitForSelector('[data-testid="section-header"]');
+
+    const header = await page.evaluate(`
+      const node = document.querySelector('[data-testid="section-header"]');
+      const eyebrow = node.querySelector('.resort-eyebrow');
+      const heading = node.querySelector('h1, h2, h3, h4');
+      return {
+        eyebrow: eyebrow ? eyebrow.innerText.trim() : null,
+        headingLevel: heading ? heading.tagName.toLowerCase() : null,
+        headingText: heading ? heading.innerText.trim() : null,
+        headingFont: heading ? window.getComputedStyle(heading).fontFamily : null,
+        eyebrowTransform: eyebrow ? window.getComputedStyle(eyebrow).textTransform : null,
+        eyebrowSpacing: eyebrow ? window.getComputedStyle(eyebrow).letterSpacing : null,
+        lede: node.querySelector('.resort-lede') ? node.querySelector('.resort-lede').innerText.trim() : null,
+      };
+    `);
+    assertMatch(header.eyebrow, /^Architectural Sanctuaries$/i, 'the eyebrow label is rendered');
+    assertSame(header.eyebrowTransform, 'uppercase', 'the eyebrow is uppercased');
+    assertTrue(Number.parseFloat(header.eyebrowSpacing) >= 2, 'the eyebrow carries wide tracking');
+    assertSame(header.headingLevel, 'h1', 'the hero uses a single h1');
+    assertMatch(header.headingText, /^Curated Coastal Residences$/i, 'the hero title is rendered');
+    assertMatch(header.headingFont, /Didot|Cormorant|Georgia|serif/i, 'headings use the display serif stack');
+    assertMatch(header.lede, /cliffside seclusion/i, 'the lede paragraph is rendered');
+  });
+
+  testAsync('the design token layer drives the rendered palette', async () => {
+    await page.goto(`${server.origin}/`);
+    await page.waitForSelector('[data-testid="luxury-price-tag"]');
+
+    const tokens = await page.evaluate(`
+      const styles = window.getComputedStyle(document.documentElement);
+      const body = window.getComputedStyle(document.body);
+      const antButton = document.querySelector('.ant-btn');
+      return {
+        bronze: styles.getPropertyValue('--resort-bronze').trim(),
+        sand: styles.getPropertyValue('--resort-sand').trim(),
+        bodyBackground: body.backgroundColor,
+        bodyFont: body.fontFamily,
+        buttonHeight: antButton ? Math.round(antButton.getBoundingClientRect().height) : 0,
+      };
+    `);
+    assertSame(tokens.bronze, '#8c704b', 'the bronze accent token is published');
+    assertSame(tokens.sand, '#faf8f5', 'the sand ground token is published');
+    assertSame(tokens.bodyBackground, 'rgb(250, 248, 245)', 'the sand ground is applied to the page');
+    assertMatch(tokens.bodyFont, /Plus Jakarta Sans/i, 'functional type uses the sans stack');
+    assertTrue(tokens.buttonHeight >= 44, `buttons honour the 44px control height (got ${tokens.buttonHeight}px)`);
+  });
+
   testAsync('room imagery is locked to a 4:3 aspect ratio', async () => {
     const ratios = await page.evaluate(`
       return [...document.querySelectorAll('img.room-card-media')]

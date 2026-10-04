@@ -1,123 +1,216 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
-import { Layout, Row, Col, Card, Typography, Tag, Button } from 'antd';
+import { Button, Col, Layout, Row, Spin } from 'antd';
 import { useInventoryStore } from '@/lib/store/inventoryStore';
 import { useBookingStore } from '@/lib/store/bookingStore';
+import { defaultRooms } from '@/lib/data/seedRooms';
+import { defaultAddons } from '@/lib/data/seedAddons';
+import { seedInventoryStorage } from '@/lib/utils/storage';
+import { AmenityIcon } from '@/components/primitives/AmenityIcon';
+import { LuxuryPriceTag } from '@/components/primitives/LuxuryPriceTag';
+import { SectionHeader } from '@/components/primitives/SectionHeader';
+import { RoomStatusBadge } from '@/components/primitives/StatusBadge';
 
 const { Header, Content, Footer } = Layout;
-const { Title, Text, Paragraph } = Typography;
+
+/** Human readable label for a suite category slug. */
+const CATEGORY_LABEL: Record<string, string> = {
+  'cliffside-villa': 'Cliffside Villa',
+  'ocean-suite': 'Ocean Suite',
+  'garden-pavilion': 'Garden Pavilion',
+  'penthouse-residence': 'Penthouse Residence',
+};
 
 export default function HomePage() {
-  const [mounted, setMounted] = useState(false);
+  const [hydrated, setHydrated] = useState(false);
   const rooms = useInventoryStore((state) => state.rooms);
+  const addons = useInventoryStore((state) => state.addons);
+  const selectedCategory = useBookingStore((state) => state.selectedCategory);
 
   useEffect(() => {
+    // `skipHydration` stores require an explicit rehydrate on the client. The seed runs
+    // first so a first-time visitor's storage mirrors the curated catalogue exactly.
+    seedInventoryStorage({ rooms: defaultRooms, addons: defaultAddons });
     useInventoryStore.persist.rehydrate();
     useBookingStore.persist.rehydrate();
-    setMounted(true);
+    setHydrated(true);
   }, []);
 
-  if (!mounted) {
-    return (
-      <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-        <Text style={{ letterSpacing: '0.1em', textTransform: 'uppercase', color: '#8C704B' }}>
-          Loading Sanctuary Inventory...
-        </Text>
-      </div>
-    );
-  }
+  const visibleRooms = useMemo(
+    () =>
+      selectedCategory === 'ALL' ? rooms : rooms.filter((room) => room.category === selectedCategory),
+    [rooms, selectedCategory],
+  );
 
   return (
-    <Layout style={{ minHeight: '100vh', background: '#FAF8F5' }}>
+    <Layout style={{ minHeight: '100vh', background: 'var(--resort-sand)' }}>
       <Header
         style={{
-          background: '#FAF8F5',
-          borderBottom: '1px solid #E5DFD7',
-          padding: '0 24px',
+          height: 'auto',
+          lineHeight: 'normal',
+          background: 'var(--resort-sand)',
+          borderBottom: '1px solid var(--resort-border)',
+          padding: '20px 24px',
           display: 'flex',
+          flexWrap: 'wrap',
           alignItems: 'center',
           justifyContent: 'space-between',
+          gap: 12,
         }}
       >
-        <div style={{ display: 'flex', alignItems: 'baseline', gap: 12 }}>
-          <Title level={3} style={{ margin: 0, letterSpacing: '0.05em', color: '#1F1B18' }}>
-            AURA COVE
-          </Title>
-          <Text style={{ fontSize: 11, letterSpacing: '0.2em', textTransform: 'uppercase', color: '#8C704B' }}>
-            Boutique Resort & Spa
-          </Text>
+        <div style={{ display: 'flex', alignItems: 'baseline', gap: 12, flexWrap: 'wrap' }}>
+          <h1 style={{ fontSize: 28, margin: 0, letterSpacing: '0.06em' }}>AURA COVE</h1>
+          <span className="resort-eyebrow resort-eyebrow--muted">Boutique Resort &amp; Spa</span>
         </div>
         <Link href="/admin/rooms">
-          <Button type="default" style={{ borderColor: '#8C704B', color: '#8C704B' }}>
-            Staff Console
-          </Button>
+          <Button>Staff Console</Button>
         </Link>
       </Header>
 
-      <Content style={{ maxWidth: 1200, margin: '0 auto', padding: '40px 24px', width: '100%' }}>
-        <div style={{ textAlign: 'center', marginBottom: 48 }}>
-          <Text style={{ letterSpacing: '0.25em', textTransform: 'uppercase', color: '#8C704B', fontSize: 13 }}>
-            Architectural Sanctuaries
-          </Text>
-          <Title level={1} style={{ margin: '8px 0 16px', color: '#1F1B18' }}>
-            Curated Coastal Residences
-          </Title>
-          <Paragraph style={{ maxWidth: 600, margin: '0 auto', color: '#5A6B7C' }}>
-            Immerse yourself in cliffside seclusion, uninterrupted ocean horizons, and dedicated hospitality rituals.
-          </Paragraph>
-        </div>
+      <Content style={{ maxWidth: 1200, margin: '0 auto', padding: '48px 24px 64px', width: '100%' }}>
+        <SectionHeader
+          align="center"
+          level={1}
+          eyebrow="Architectural Sanctuaries"
+          title="Curated Coastal Residences"
+          description="Immerse yourself in cliffside seclusion, uninterrupted ocean horizons, and dedicated hospitality rituals."
+        />
 
-        <Row gutter={[24, 24]}>
-          {rooms.map((room) => (
-            <Col xs={24} sm={12} lg={8} key={room.id}>
-              <Card
-                hoverable
-                cover={
-                  <div style={{ position: 'relative', overflow: 'hidden' }}>
-                    <img
-                      src={room.images[0]?.url}
-                      alt={room.title}
-                      className="room-card-media"
-                    />
-                    <div style={{ position: 'absolute', top: 12, right: 12 }}>
-                      <Tag color="#4E6E58">{room.viewType}</Tag>
+        {!hydrated ? (
+          <div
+            role="status"
+            aria-live="polite"
+            style={{
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              gap: 16,
+              padding: '96px 0',
+            }}
+          >
+            <Spin />
+            <span className="resort-eyebrow resort-eyebrow--muted">Opening the sanctuary inventory</span>
+          </div>
+        ) : (
+          <>
+            <div
+              style={{
+                display: 'flex',
+                flexWrap: 'wrap',
+                gap: 24,
+                justifyContent: 'space-between',
+                alignItems: 'flex-end',
+                marginTop: 40,
+                paddingBottom: 18,
+                borderBottom: '1px solid var(--resort-border)',
+              }}
+            >
+              <span className="resort-eyebrow resort-eyebrow--muted">
+                {visibleRooms.length} {visibleRooms.length === 1 ? 'residence' : 'residences'} available
+              </span>
+              <span className="resort-eyebrow resort-eyebrow--muted">
+                {addons.length} concierge services
+              </span>
+            </div>
+
+            <Row gutter={[24, 24]} style={{ marginTop: 24 }}>
+              {visibleRooms.map((room) => (
+                <Col xs={24} sm={24} md={12} lg={8} key={room.id}>
+                  <article
+                    style={{
+                      background: 'var(--resort-paper)',
+                      border: '1px solid var(--resort-border-soft)',
+                      borderRadius: 'var(--resort-radius-lg)',
+                      overflow: 'hidden',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      height: '100%',
+                    }}
+                  >
+                    <div style={{ position: 'relative' }}>
+                      <img src={room.images[0]?.url} alt={room.images[0]?.altText ?? room.title} className="room-card-media" />
+                      <div style={{ position: 'absolute', top: 12, right: 12 }}>
+                        <RoomStatusBadge status={room.status} size="sm" />
+                      </div>
                     </div>
-                  </div>
-                }
-                styles={{ body: { padding: 20 } }}
-              >
-                <Text style={{ fontSize: 12, color: '#8C704B', textTransform: 'uppercase', letterSpacing: '0.1em' }}>
-                  {room.category.replace('-', ' ')}
-                </Text>
-                <Title level={4} style={{ margin: '4px 0 8px', color: '#1F1B18' }}>
-                  {room.title}
-                </Title>
-                <Paragraph ellipsis={{ rows: 2 }} style={{ color: '#5A6B7C', fontSize: 14, minHeight: 42 }}>
-                  {room.tagline}
-                </Paragraph>
-                <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginTop: 16 }}>
-                  <div>
-                    <Text style={{ fontSize: 20, fontWeight: 600, color: '#8C704B' }}>
-                      ${room.basePricePerNight.toLocaleString()}
-                    </Text>
-                    <Text style={{ fontSize: 12, color: '#5A6B7C' }}> / night</Text>
-                  </div>
-                  <Link href={`/rooms/${room.slug}`}>
-                    <Button type="primary">Explore Suite</Button>
-                  </Link>
-                </div>
-              </Card>
-            </Col>
-          ))}
-        </Row>
+
+                    <div style={{ padding: 22, display: 'flex', flexDirection: 'column', gap: 10, flex: 1 }}>
+                      <span className="resort-eyebrow">{CATEGORY_LABEL[room.category]}</span>
+                      <h3 style={{ margin: 0 }}>{room.title}</h3>
+                      <p style={{ color: 'var(--resort-taupe)', fontSize: 14, minHeight: 44 }}>{room.tagline}</p>
+
+                      <ul
+                        style={{
+                          listStyle: 'none',
+                          display: 'flex',
+                          flexWrap: 'wrap',
+                          gap: 10,
+                          margin: '4px 0 8px',
+                        }}
+                      >
+                        {room.amenities.slice(0, 3).map((amenity) => (
+                          <li
+                            key={amenity.id}
+                            title={amenity.name}
+                            style={{
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: 6,
+                              color: 'var(--resort-stone)',
+                              fontSize: 12,
+                            }}
+                          >
+                            <AmenityIcon iconKey={amenity.iconKey} size={16} />
+                            {amenity.name}
+                          </li>
+                        ))}
+                      </ul>
+
+                      <div
+                        style={{
+                          marginTop: 'auto',
+                          paddingTop: 16,
+                          borderTop: '1px solid var(--resort-border-soft)',
+                          display: 'flex',
+                          flexWrap: 'wrap',
+                          alignItems: 'flex-end',
+                          justifyContent: 'space-between',
+                          gap: 12,
+                        }}
+                      >
+                        <LuxuryPriceTag
+                          amount={room.basePricePerNight}
+                          prefix="from"
+                          unitLabel="night"
+                          compareAtAmount={room.weekendPricePerNight}
+                          note={`Weekend rate · ${room.squareMeters} m² · ${room.viewType}`}
+                        />
+                        <Link href={`/rooms/${room.slug}`}>
+                          <Button type="primary">Explore Suite</Button>
+                        </Link>
+                      </div>
+                    </div>
+                  </article>
+                </Col>
+              ))}
+            </Row>
+          </>
+        )}
       </Content>
 
-      <Footer style={{ textAlign: 'center', background: '#F3EFE9', borderTop: '1px solid #E5DFD7', padding: '24px' }}>
-        <Text style={{ fontSize: 13, color: '#5A6B7C' }}>
-          Aura Cove Sanctuary Resort &copy; 2026. All rights reserved.
-        </Text>
+      <Footer
+        style={{
+          textAlign: 'center',
+          background: 'var(--resort-linen)',
+          borderTop: '1px solid var(--resort-border)',
+          padding: 24,
+        }}
+      >
+        <span style={{ fontSize: 13, color: 'var(--resort-stone)' }}>
+          Aura Cove Sanctuary Resort &amp; Spa — est. 2026
+        </span>
       </Footer>
     </Layout>
   );
