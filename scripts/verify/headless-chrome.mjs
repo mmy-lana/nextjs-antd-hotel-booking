@@ -306,6 +306,18 @@ export class HeadlessPage {
     await this.setViewport({ width: 1440, height: 900, mobile: false });
   }
 
+  /**
+   * Waits for mount animations to finish before a measurement is taken.
+   *
+   * Ant Design popovers and drawers animate with a transform scale, so a box measured
+   * mid-animation reads a few pixels short. Layout assertions call this first.
+   *
+   * @param {number} [ms] milliseconds to allow the longest configured motion to settle.
+   */
+  async settle(ms = 600) {
+    await sleep(ms);
+  }
+
   /** Clears the captured console and error buffers. */
   resetDiagnostics() {
     this.consoleEntries = [];
@@ -611,6 +623,9 @@ export class HeadlessPage {
           const style = window.getComputedStyle(node);
           if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') { return false; }
           if (node.closest('[aria-hidden="true"]')) { return false; }
+          // Bare inputs nested inside a composite control (picker, select, number field)
+          // are not the touch target themselves; the wrapper around them is.
+          if (node.matches('input, textarea, select') && node.closest('.ant-picker, .ant-select, .ant-input-number, .ant-input-affix-wrapper')) { return false; }
           const rect = node.getBoundingClientRect();
           return rect.width > 0 && rect.height > 0;
         })
