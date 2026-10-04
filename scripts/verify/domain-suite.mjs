@@ -12,7 +12,7 @@
 import './install-dom.mjs';
 import dayjs from 'dayjs';
 
-import { assertEqual, assertFalse, assertMatch, assertSame, assertThrows, assertTrue, report, runAsyncTests, suite, test, testAsync } from './harness.mjs';
+import { assertEqual, assertFalse, assertMatch, assertRejects, assertSame, assertThrows, assertTrue, report, runAsyncTests, suite, test, testAsync } from './harness.mjs';
 import { attachWindow, detachWindow, installMemoryStorage, resetMemoryStorage } from './dom-stub.mjs';
 
 import { defaultRooms } from '@/lib/data/seedRooms';
@@ -631,9 +631,9 @@ test('toggles operational room status through updateRoomStatus', () => {
   );
 });
 
-test('refuses to delete a suite that still carries active reservations', () => {
+testAsync('refuses to delete a suite that still carries active reservations', async () => {
   resetInventoryStore();
-  const reservation = useInventoryStore.getState().createReservation({
+  const reservation = await useInventoryStore.getState().createReservation({
     roomId: CLIFFSIDE.id,
     guest: VALID_GUEST,
     checkInDate: '2026-05-01',
@@ -666,9 +666,9 @@ test('refuses to delete a suite that still carries active reservations', () => {
   );
 });
 
-test('creates a reservation with a RES-XXXXXXXXXX booking reference', () => {
+testAsync('creates a reservation with a RES-XXXXXXXXXX booking reference', async () => {
   resetInventoryStore();
-  const reservation = useInventoryStore.getState().createReservation({
+  const reservation = await useInventoryStore.getState().createReservation({
     roomId: PENTHOUSE.id,
     guest: { ...VALID_GUEST, guestId: deriveGuestId(VALID_GUEST.email) },
     checkInDate: '2026-07-01',
@@ -686,10 +686,10 @@ test('creates a reservation with a RES-XXXXXXXXXX booking reference', () => {
   assertSame(useInventoryStore.getState().reservations.length, 1, 'the reservation is recorded');
 });
 
-test('rejects an overlapping booking as a double booking', () => {
+testAsync('rejects an overlapping booking as a double booking', async () => {
   resetInventoryStore();
   const quote = calculateReservationQuote(CLIFFSIDE, '2026-08-10', '2026-08-14', []);
-  useInventoryStore.getState().createReservation({
+  await useInventoryStore.getState().createReservation({
     roomId: CLIFFSIDE.id,
     guest: VALID_GUEST,
     checkInDate: '2026-08-10',
@@ -701,24 +701,23 @@ test('rejects an overlapping booking as a double booking', () => {
     paymentStatus: 'PAID',
   });
 
-  assertThrows(
-    () =>
-      useInventoryStore.getState().createReservation({
-        roomId: CLIFFSIDE.id,
-        guest: { ...VALID_GUEST, firstName: 'Claude' },
-        checkInDate: '2026-08-12',
-        checkOutDate: '2026-08-16',
-        guestCounts: { adults: 2, children: 0, infants: 0 },
-        selectedAddons: [],
-        pricing: quote,
-        status: 'PENDING',
-        paymentStatus: 'PENDING',
-      }),
+  await assertRejects(
+    useInventoryStore.getState().createReservation({
+      roomId: CLIFFSIDE.id,
+      guest: { ...VALID_GUEST, firstName: 'Claude' },
+      checkInDate: '2026-08-12',
+      checkOutDate: '2026-08-16',
+      guestCounts: { adults: 2, children: 0, infants: 0 },
+      selectedAddons: [],
+      pricing: quote,
+      status: 'PENDING',
+      paymentStatus: 'PENDING',
+    }),
     'an overlapping window must be rejected',
     'reserved during checkout',
   );
 
-  const turnover = useInventoryStore.getState().createReservation({
+  const turnover = await useInventoryStore.getState().createReservation({
     roomId: CLIFFSIDE.id,
     guest: { ...VALID_GUEST, firstName: 'Claude' },
     checkInDate: '2026-08-14',
@@ -732,29 +731,28 @@ test('rejects an overlapping booking as a double booking', () => {
   assertTrue(Boolean(turnover), 'a booking that begins on the departure date is allowed');
 });
 
-test('throws a descriptive error when the room is missing from the catalogue', () => {
+testAsync('throws a descriptive error when the room is missing from the catalogue', async () => {
   resetInventoryStore();
-  assertThrows(
-    () =>
-      useInventoryStore.getState().createReservation({
-        roomId: '00000000-0000-4000-8000-000000000000',
-        guest: VALID_GUEST,
-        checkInDate: '2026-09-01',
-        checkOutDate: '2026-09-04',
-        guestCounts: { adults: 1, children: 0, infants: 0 },
-        selectedAddons: [],
-        pricing: null,
-        status: 'PENDING',
-        paymentStatus: 'PENDING',
-      }),
+  await assertRejects(
+    useInventoryStore.getState().createReservation({
+      roomId: '00000000-0000-4000-8000-000000000000',
+      guest: VALID_GUEST,
+      checkInDate: '2026-09-01',
+      checkOutDate: '2026-09-04',
+      guestCounts: { adults: 1, children: 0, infants: 0 },
+      selectedAddons: [],
+      pricing: null,
+      status: 'PENDING',
+      paymentStatus: 'PENDING',
+    }),
     'an unknown room must be rejected',
     'not found in inventory',
   );
 });
 
-test('advances reservation status through check-in, check-out and cancellation', () => {
+testAsync('advances reservation status through check-in, check-out and cancellation', async () => {
   resetInventoryStore();
-  const reservation = useInventoryStore.getState().createReservation({
+  const reservation = await useInventoryStore.getState().createReservation({
     roomId: LAGOON.id,
     guest: VALID_GUEST,
     checkInDate: '2026-10-01',
@@ -970,7 +968,7 @@ testAsync('persists store mutations back to localStorage', async () => {
 testAsync('round-trips a full reservation through localStorage', async () => {
   resetMemoryStorage();
   resetInventoryStore();
-  const reservation = useInventoryStore.getState().createReservation({
+  const reservation = await useInventoryStore.getState().createReservation({
     roomId: GARDEN.id,
     guest: VALID_GUEST,
     checkInDate: '2026-12-20',

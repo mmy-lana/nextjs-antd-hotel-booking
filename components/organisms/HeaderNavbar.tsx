@@ -130,16 +130,16 @@ export function HeaderNavbar({ items = DEFAULT_NAV_ITEMS, className }: HeaderNav
         </nav>
       )}
 
-      {/* `width` is deprecated on Ant Design v6 in favour of `size`, which maps to the
-          wrapper width for left/right placement and accepts strings such as `100%`. */}
       <Drawer
         title="Aura Cove"
         placement="right"
-        size="100%"
         open={drawerOpen}
         onClose={closeDrawer}
         data-testid="navbar-drawer"
         styles={{
+          // `width` is deprecated on Ant Design v6. The panel extent is set through the
+          // wrapper style slot rather than the legacy prop.
+          wrapper: { width: '100%' },
           body: { padding: 24 },
           header: { borderBottom: '1px solid var(--resort-border)' },
         }}

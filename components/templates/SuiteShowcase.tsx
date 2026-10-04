@@ -370,7 +370,7 @@ export function SuiteShowcase({ slug, initialRoom }: SuiteShowcaseProps) {
                     type="warning"
                     showIcon
                     style={{ marginTop: 20 }}
-                    message="Currently unavailable"
+                    title="Currently unavailable"
                     description={
                       capacity?.withinCapacity === false
                         ? (capacity.reason ?? 'This suite cannot take the selected party.')

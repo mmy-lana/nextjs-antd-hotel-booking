@@ -332,7 +332,7 @@ export function ItineraryPass({ reference }: ItineraryPassProps) {
               type="success"
               showIcon
               style={{ marginTop: 20 }}
-              message="We have your preferences on file"
+              title="We have your preferences on file"
               description="Our concierge will apply them to this and any future stay."
             />
           ) : null}

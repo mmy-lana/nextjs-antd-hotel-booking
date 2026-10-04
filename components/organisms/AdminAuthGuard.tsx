@@ -101,7 +101,7 @@ export function AdminAuthGuard({ children }: AdminAuthGuardProps) {
             <Alert
               type="error"
               showIcon
-              message="Invalid authorisation"
+              title="Invalid authorisation"
               description="The supplied staff credentials do not grant access."
               style={{ marginBottom: 16 }}
               data-testid="admin-auth-error"

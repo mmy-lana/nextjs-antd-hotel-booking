@@ -302,7 +302,8 @@ export function BookingDrawer({ open, room, onClose, onReserved }: BookingDrawer
     }
 
     try {
-      const reservation = createReservation({
+      // The store commits under a cross-tab Web Lock, so the call is asynchronous.
+      const reservation = await createReservation({
         roomId: parsed.data.roomId,
         guest: { ...parsed.data.guest, guestId: deriveGuestId(parsed.data.guest.email) },
         checkInDate: parsed.data.checkInDate,
@@ -343,14 +344,14 @@ export function BookingDrawer({ open, room, onClose, onReserved }: BookingDrawer
     totalNights,
   ]);
 
-  // `width` is deprecated on Ant Design v6; `size` carries the panel extent instead.
+  // Responsive panel extent, applied through the wrapper style slot because Ant Design
+  // v6 deprecates the `width` prop.
   const width = screens.xl ? 560 : screens.md ? 480 : '100%';
 
   return (
     <Drawer
       open={open}
       onClose={onClose}
-      size={width}
       placement="right"
       destroyOnHidden={false}
       title={
@@ -360,7 +361,11 @@ export function BookingDrawer({ open, room, onClose, onReserved }: BookingDrawer
           <span style={{ fontFamily: 'var(--font-display)', fontSize: 22 }}>Reserve a residence</span>
         )
       }
-      styles={{ header: { borderBottom: '1px solid var(--resort-border)' }, body: { padding: 24 } }}
+      styles={{
+        wrapper: { width },
+        header: { borderBottom: '1px solid var(--resort-border)' },
+        body: { padding: 24 },
+      }}
       data-testid="booking-drawer"
       extra={
         room ? (
@@ -377,7 +382,7 @@ export function BookingDrawer({ open, room, onClose, onReserved }: BookingDrawer
         <Alert
           type="info"
           showIcon
-          message="No residence selected"
+          title="No residence selected"
           description="Choose a suite from the catalogue to begin a reservation."
         />
       ) : (
@@ -492,7 +497,7 @@ export function BookingDrawer({ open, room, onClose, onReserved }: BookingDrawer
               type="warning"
               showIcon
               style={{ marginTop: 20 }}
-              message="Dates unavailable"
+              title="Dates unavailable"
               description={conflictMessage}
               data-testid="booking-conflict"
             />
@@ -503,7 +508,7 @@ export function BookingDrawer({ open, room, onClose, onReserved }: BookingDrawer
               type="error"
               showIcon
               style={{ marginTop: 20 }}
-              message="Reservation could not be completed"
+              title="Reservation could not be completed"
               description={submitError}
               data-testid="booking-error"
             />

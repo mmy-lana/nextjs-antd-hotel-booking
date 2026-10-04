@@ -164,6 +164,26 @@ export function assertThrows(fn, message, expectedSubstring) {
   return thrown;
 }
 
+/** Asserts that an async call rejects, optionally matching the message. */
+export async function assertRejects(promise, message, expectedSubstring) {
+  let thrown = null;
+  try {
+    await promise;
+  } catch (error) {
+    thrown = error;
+  }
+  if (!thrown) {
+    throw new Error(`${message}\n      expected the call to reject but it resolved`);
+  }
+  if (expectedSubstring && !String(thrown.message).includes(expectedSubstring)) {
+    throw new Error(
+      `${message}\n      expected message to contain: ${expectedSubstring}\n      actual: ${thrown.message}`,
+    );
+  }
+  return thrown;
+}
+
+
 /**
  * Prints the report and terminates the process with the appropriate exit code.
  *

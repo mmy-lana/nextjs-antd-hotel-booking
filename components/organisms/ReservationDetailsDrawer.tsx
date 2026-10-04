@@ -105,25 +105,28 @@ export function ReservationDetailsDrawer({
   };
 
   return (
-    /* `width` is deprecated on Ant Design v6 in favour of `size`. */
     <Drawer
       open={open}
       onClose={onClose}
-      size="min(520px, 100vw)"
       placement="right"
       title={
         <span style={{ fontFamily: 'var(--font-display)', fontSize: 22 }}>
           {reservation ? reservation.bookingReference : 'Reservation'}
         </span>
       }
-      styles={{ header: { borderBottom: '1px solid var(--resort-border)' }, body: { padding: 24 } }}
+      styles={{
+        // Ant Design v6 deprecates `width`; the extent is set on the wrapper slot.
+        wrapper: { width: 'min(520px, 100vw)' },
+        header: { borderBottom: '1px solid var(--resort-border)' },
+        body: { padding: 24 },
+      }}
       data-testid="reservation-drawer"
     >
       {!reservation ? (
         <Alert
           type="info"
           showIcon
-          message="No reservation selected"
+          title="No reservation selected"
           description="Choose an itinerary from the register to review its folio."
         />
       ) : (
@@ -237,7 +240,7 @@ export function ReservationDetailsDrawer({
               type="info"
               showIcon
               style={{ marginTop: 16 }}
-              message="One or more concierge services are no longer offered"
+              title="One or more concierge services are no longer offered"
               description="They remain priced at the rate captured when the guest booked."
             />
           ) : null}

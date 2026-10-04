@@ -16,6 +16,7 @@ import { DateGuestFilterBar } from '@/components/molecules/DateGuestFilterBar';
 import { RoomCard } from '@/components/molecules/RoomCard';
 import { BookingDrawer } from '@/components/organisms/BookingDrawer';
 import { SectionHeader } from '@/components/primitives/SectionHeader';
+import { maybeInjectSegmentFault } from '@/lib/dev/faultInjection';
 import type { Room } from '@/types/booking';
 
 const { Content, Footer } = Layout;
@@ -35,6 +36,9 @@ interface CatalogueEntry {
  * which keeps the catalogue informative instead of mysteriously short.
  */
 export function ResortShowcase() {
+  // Development-only; compiled out of production builds. See `lib/dev/faultInjection.ts`.
+  maybeInjectSegmentFault();
+
   const [hydrated, setHydrated] = useState(false);
   const [conciergeSelections, setConciergeSelections] = useState<AddonSelectionMap>({});
   const [bookingRoom, setBookingRoom] = useState<Room | null>(null);

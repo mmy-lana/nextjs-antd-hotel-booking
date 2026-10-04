@@ -19,6 +19,7 @@ import dayjs from 'dayjs';
 
 import { defaultRooms } from '@/lib/data/seedRooms';
 import { defaultAddons } from '@/lib/data/seedAddons';
+import { calculateReservationQuote } from '@/lib/utils/pricingEngine';
 
 import { launchHeadlessChrome, closeAllPages, openPage, resolveChromeBinary } from './headless-chrome.mjs';
 import { startNextServer } from './next-server.mjs';
@@ -120,7 +121,8 @@ async function checkPage(run, { label, allowStatuses = [] }) {
 async function selectStayDates(page, arrivalIso, departureIso) {
   const arrival = dayjs(arrivalIso);
   const departure = dayjs(departureIso);
-  const targetMonth = arrival.format('MMMM YYYY');
+  // The picker header renders `Oct2026` with no space, so the comparison must match that.
+  const targetMonth = arrival.format('MMM') + arrival.format('YYYY');
 
   /** Reads the month currently rendered in the open calendar header. */
   const displayedMonth = () =>
@@ -139,7 +141,7 @@ async function selectStayDates(page, arrivalIso, departureIso) {
       }
       const advanced = await page.evaluate(`
         const dropdown = document.querySelector('.ant-picker-dropdown:not(.ant-picker-dropdown-hidden)');
-        const next = dropdown.querySelector('.ant-picker-next-month-btn');
+        const next = dropdown.querySelector('.ant-picker-header-next-btn');
         if (!next) { return false; }
         next.dispatchEvent(new MouseEvent('click', { bubbles: true }));
         return true;
@@ -152,6 +154,11 @@ async function selectStayDates(page, arrivalIso, departureIso) {
   };
 
   const openPicker = async (testId) => {
+    // The picker input only receives a click once it is visible inside the scrolled
+    // drawer body; a mounted-but-off-screen input silently swallows the click and no
+    // dropdown ever opens.
+    await page.waitForSelector(`[data-testid="${testId}"]`, { visible: true });
+    await page.scrollIntoView(`[data-testid="${testId}"]`);
     await page.click(`[data-testid="${testId}"]`);
     await page.waitForSelector('.ant-picker-dropdown:not(.ant-picker-dropdown-hidden)');
     await page.settle(400);
@@ -1814,6 +1821,231 @@ try {
     `);
     assertSame(occupancy[0], '1', 'the suite with a live itinerary is reported as occupied tonight');
   });
+
+  /* ------------------------------------------------------------------ */
+  suite('Cross-tab inventory synchronisation');
+
+  testAsync('a commit in one tab is reflected in a concurrent sibling tab', async () => {
+    await freshPage();
+    await page.setViewport({ width: 1440, height: 900, mobile: false });
+
+    // A confirmed itinerary already on file, committed by "another guest" earlier.
+    const seeded = {
+      id: '9f2b1c3d-4e5f-4a6b-8c7d-0e1f2a3b4c5d',
+      bookingReference: 'RES-XTAB000001',
+      roomId: defaultRooms[2].id, // G-108
+      guest: {
+        guestId: 'guest-xtab',
+        title: 'Ms',
+        firstName: 'Amara',
+        lastName: 'Nakamura',
+        email: 'amara.nakamura@example.com',
+        phone: '+1 555 0177',
+      },
+      checkInDate: '2027-05-04',
+      checkOutDate: '2027-05-08',
+      guestCounts: { adults: 2, children: 0, infants: 0 },
+      selectedAddons: [],
+      pricing: calculateReservationQuote(
+        defaultRooms[2],
+        '2027-05-04',
+        '2027-05-08',
+        []
+      ),
+      status: 'CONFIRMED',
+      paymentStatus: 'PAID',
+      createdAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: '2026-01-01T00:00:00.000Z',
+    };
+    await resetInventory(page, [seeded]);
+
+    // A second concierge terminal is already open on the register when the commit lands.
+    const sibling = await openPage(browser.browserWsUrl);
+    await sibling.setViewport({ width: 1440, height: 900, mobile: false });
+    await sibling.goto(`${server.origin}/`);
+    await authoriseStaff(sibling);
+    await sibling.goto(`${server.origin}/admin/reservations`);
+    await sibling.waitForSelector('[data-testid="reservation-register"]', { timeout: 20_000 });
+    await sibling.settle(600);
+
+    const before = await sibling.evaluate(`
+      return {
+        count: document.querySelector('[data-testid="reservation-count"]').innerText.trim(),
+        text: document.querySelector('[data-testid="reservation-register"]').innerText.replace(/\\n+/g, ' | '),
+      };
+    `);
+    assertMatch(before.count, /^1 itinerary in view$/i, 'the sibling tab opens on the live itinerary');
+    assertMatch(before.text, /Confirmed/i, 'the sibling shows the itinerary as confirmed');
+    assertMatch(before.text, /Amara Nakamura/, 'the sibling renders the guest record');
+
+    // The first terminal cancels the itinerary through the register.
+    await page.goto(`${server.origin}/admin/reservations`);
+    await page.waitForSelector(`[data-testid="cancel-reservation-${seeded.bookingReference}"]`, {
+      timeout: 20_000,
+    });
+    await page.click(`[data-testid="cancel-reservation-${seeded.bookingReference}"]`);
+    await page.waitForSelector('.ant-message-notice', { timeout: 20_000 });
+    await page.settle(600);
+
+    // The sibling must converge on the new status without a reload.
+    await sibling.settle(1500);
+    const after = await sibling.evaluate(`
+      return {
+        count: document.querySelector('[data-testid="reservation-count"]').innerText.trim(),
+        text: document.querySelector('[data-testid="reservation-register"]').innerText.replace(/\\n+/g, ' | '),
+      };
+    `);
+    assertSame(
+      after.count,
+      before.count,
+      'a status change does not add or remove the itinerary',
+    );
+    assertMatch(after.text, /Cancelled/i, 'the sibling tab reflects the cancellation without a reload');
+    assertFalse(
+      /Confirmed/i.test(after.text),
+      'the sibling tab no longer reports the itinerary as confirmed',
+    );
+
+    // A cancellation must also free the window for the catalogue in the sibling tab.
+    await sibling.goto(`${server.origin}/`);
+    await sibling.evaluate(`
+      window.localStorage.setItem('resort-search-session', JSON.stringify({
+        state: {
+          dateRange: ['${seeded.checkInDate}', '${seeded.checkOutDate}'],
+          guests: { adults: 2, children: 0 },
+          selectedCategory: 'ALL',
+        },
+        version: 0,
+      }));
+      return true;
+    `);
+    await sibling.goto(`${server.origin}/`);
+    await sibling.waitForSelector('[data-room-number="G-108"]');
+    await sibling.settle(800);
+
+    const catalogue = await sibling.evaluate(`
+      return document.querySelector('[data-room-number="G-108"]').dataset.bookable;
+    `);
+    assertSame(
+      catalogue,
+      'true',
+      'the cancelled window is released back to the catalogue in the sibling tab',
+    );
+
+    await sibling.close();
+  });
+
+  testAsync('the staff console is gated until a passkey is accepted', async () => {
+    await freshPage();
+    await page.setViewport({ width: 1440, height: 900, mobile: false });
+
+    // A visitor arriving straight at a console URL, with no prior authorisation.
+    await checkPage(
+      async () => {
+        await page.goto(`${server.origin}/admin/rooms`);
+        await page.waitForSelector('[data-testid="admin-passkey"]');
+      },
+      { label: 'the locked console' },
+    );
+
+    const locked = await page.evaluate(`
+      return {
+        heading: document.querySelector('h3') ? document.querySelector('h3').innerText.trim() : null,
+        consoleVisible: Boolean(document.querySelector('[data-testid="room-inventory-table"]')),
+        session: window.sessionStorage.getItem('aura_cove_staff_session'),
+      };
+    `);
+    assertMatch(locked.heading ?? '', /Staff Access Control/i, 'the gate prompts for authorisation');
+    assertFalse(locked.consoleVisible, 'the inventory console is not rendered for an unauthorised visitor');
+    assertSame(locked.session, null, 'no session is created by merely visiting the URL');
+
+    await page.type('[data-testid="admin-passkey"]', 'wrong-passkey');
+    await page.click('[data-testid="admin-authorize"]');
+    await page.waitForSelector('[data-testid="admin-auth-error"]');
+    assertTrue(
+      await page.evaluate(`return window.sessionStorage.getItem('aura_cove_staff_session') === null;`),
+      'a rejected passkey does not open a session',
+    );
+
+    await page.type('[data-testid="admin-passkey"]', 'auracove2026');
+    await page.click('[data-testid="admin-authorize"]');
+    await page.waitForSelector('[data-testid="room-inventory-table"]', { timeout: 15_000 });
+    await page.settle();
+
+    assertTrue(
+      await page.evaluate(`return window.sessionStorage.getItem('aura_cove_staff_session') === 'active';`),
+      'the accepted passkey opens a staff session',
+    );
+
+    // Ending the session re-locks the console.
+    await page.click('[data-testid="admin-sign-out"]');
+    await page.waitForSelector('[data-testid="admin-passkey"]');
+    assertFalse(
+      await page.evaluate(`return Boolean(document.querySelector('[data-testid="room-inventory-table"]'));`),
+      'ending the session hides the console again',
+    );
+  });
+
+  testAsync('the reservation register is gated as well', async () => {
+    await freshPage();
+    await page.setViewport({ width: 1440, height: 900, mobile: false });
+    await page.goto(`${server.origin}/admin/reservations`);
+    await page.waitForSelector('[data-testid="admin-passkey"]');
+    assertFalse(
+      await page.evaluate(`return Boolean(document.querySelector('[data-testid="reservation-register"]'));`),
+      'guest PII in the register is not rendered for an unauthorised visitor',
+    );
+  });
+
+  testAsync('the console shell publishes its metrics top bar', async () => {
+    await freshPage();
+    await resetInventory(page);
+    await page.setViewport({ width: 1440, height: 900, mobile: false });
+    await createReservationThroughUi(page, 'V-101');
+
+    await checkPage(
+      async () => {
+        await page.goto(`${server.origin}/admin/rooms`);
+        await page.waitForSelector('[data-testid="console-metrics"]');
+      },
+      { label: 'the inventory console' },
+    );
+
+    const inventoryMetrics = await page.evaluate(`
+      return [...document.querySelectorAll('[data-testid="console-metrics"] dt')].map((node) => node.innerText.trim());
+    `);
+    assertEqual(
+      inventoryMetrics.map((label) => label.toLowerCase()),
+      ['in inventory', 'occupied tonight', 'withdrawn', 'booked value'],
+      'the inventory console publishes its occupancy figures',
+    );
+
+    await checkPage(
+      async () => {
+        await page.goto(`${server.origin}/admin/reservations`);
+        await page.waitForSelector('[data-testid="console-metrics"]');
+      },
+      { label: 'the reservation register' },
+    );
+    const registerMetrics = await page.evaluate(`
+      return [...document.querySelectorAll('[data-testid="console-metrics"] dt')].map((node) => node.innerText.trim());
+    `);
+    assertEqual(
+      registerMetrics.map((label) => label.toLowerCase()),
+      ['live itineraries', 'in house tonight', 'booked value'],
+      'the register publishes its itinerary figures',
+    );
+
+    const occupancy = await page.evaluate(`
+      const cards = [...document.querySelectorAll('[data-testid="console-metrics"] dd')];
+      return cards.map((node) => node.innerText.trim());
+    `);
+    assertSame(occupancy[0], '1', 'the suite with a live itinerary is reported as occupied tonight');
+  });
+
+  /* ------------------------------------------------------------------ */
+  suite('Cross-tab inventory synchronisation');
+
 
   /* ------------------------------------------------------------------ */
   suite('Phase 5 — responsive viewport sweep');
