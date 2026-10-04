@@ -17,6 +17,7 @@ export default function AdminReservationsPage() {
   const { message } = App.useApp();
   const reservations = useInventoryStore((state) => state.reservations);
   const rooms = useInventoryStore((state) => state.rooms);
+  const archivedRooms = useInventoryStore((state) => state.archivedRooms ?? []);
   const addons = useInventoryStore((state) => state.addons);
   const updateReservationStatus = useInventoryStore((state) => state.updateReservationStatus);
   const cancelReservation = useInventoryStore((state) => state.cancelReservation);
@@ -26,7 +27,10 @@ export default function AdminReservationsPage() {
   const [statusFilter, setStatusFilter] = useState<Reservation['status'] | 'ALL'>('ALL');
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
-  const roomById = useMemo(() => new Map(rooms.map((room) => [room.id, room])), [rooms]);
+  const roomById = useMemo(
+    () => new Map([...archivedRooms, ...rooms].map((room) => [room.id, room])),
+    [archivedRooms, rooms],
+  );
 
   const filtered = useMemo(() => {
     const needle = query.trim().toLowerCase();

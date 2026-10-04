@@ -123,12 +123,19 @@ export function writeJsonValue<T>(key: string, value: T): boolean {
   try {
     storage.setItem(key, JSON.stringify(value));
     return true;
-  } catch {
+  } catch (error) {
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(
+        new CustomEvent('aura-cove-storage-error', {
+          detail: { operation: 'write', key, error },
+        })
+      );
+    }
     return false;
   }
 }
 
-/** Removes a single key. Never throws. */
+/** Removes a single key. Dispatches diagnostic event on failure without throwing. */
 export function removeValue(key: string): void {
   const storage = getBrowserStorage();
   if (!storage) {
@@ -136,9 +143,41 @@ export function removeValue(key: string): void {
   }
   try {
     storage.removeItem(key);
-  } catch {
-    /* Storage is blocked; nothing further can be done for the guest. */
+  } catch (error) {
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(
+        new CustomEvent('aura-cove-storage-error', {
+          detail: { operation: 'remove', key, error },
+        })
+      );
+    }
   }
+}
+
+/** Masks an email address to protect customer PII from shoulder-surfing in public views. */
+export function maskEmail(email: string): string {
+  const trimmed = email.trim();
+  const atIndex = trimmed.indexOf('@');
+  if (atIndex <= 1) {
+    return trimmed;
+  }
+  const user = trimmed.slice(0, atIndex);
+  const domain = trimmed.slice(atIndex);
+  if (user.length <= 2) {
+    return `${user[0]}*${domain}`;
+  }
+  return `${user[0]}${'*'.repeat(Math.min(user.length - 2, 6))}${user[user.length - 1]}${domain}`;
+}
+
+/** Masks a telephone number, preserving trailing digits for reservation verification. */
+export function maskPhone(phone: string): string {
+  const trimmed = phone.trim();
+  if (trimmed.length <= 4) {
+    return trimmed;
+  }
+  const visibleTail = trimmed.slice(-2);
+  const leading = trimmed.slice(0, trimmed.length - 2);
+  return leading.replace(/[0-9]/g, '*') + visibleTail;
 }
 
 /**

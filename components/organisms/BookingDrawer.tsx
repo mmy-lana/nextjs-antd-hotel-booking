@@ -515,6 +515,8 @@ export function BookingDrawer({ open, room, onClose, onReserved }: BookingDrawer
           ) : null}
 
           <div
+            aria-live="polite"
+            aria-atomic="true"
             style={{
               marginTop: 24,
               padding: 20,

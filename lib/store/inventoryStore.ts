@@ -142,6 +142,7 @@ async function runExclusively<T>(name: string, task: () => T): Promise<T> {
 
 interface InventoryState {
   rooms: Room[];
+  archivedRooms: Room[];
   reservations: Reservation[];
   addons: AddonService[];
   addRoom: (room: Omit<Room, 'id' | 'createdAt' | 'updatedAt'>) => void;
@@ -165,6 +166,7 @@ export const useInventoryStore = create<InventoryState>()(
   persist(
     (set, get) => ({
       rooms: defaultRooms,
+      archivedRooms: [],
       reservations: [],
       addons: defaultAddons,
 
@@ -191,6 +193,7 @@ export const useInventoryStore = create<InventoryState>()(
       },
 
       deleteRoom: (id) => {
+        const target = get().rooms.find((r) => r.id === id);
         const hasActive = get().reservations.some(
           (r) => r.roomId === id && !['CANCELLED', 'CHECKED_OUT'].includes(r.status)
         );
@@ -199,6 +202,7 @@ export const useInventoryStore = create<InventoryState>()(
         }
         set((state) => ({
           rooms: state.rooms.filter((r) => r.id !== id),
+          archivedRooms: target ? [...state.archivedRooms, target] : state.archivedRooms,
         }));
         broadcastMutation('rooms');
       },
