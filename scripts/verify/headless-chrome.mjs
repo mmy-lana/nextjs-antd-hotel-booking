@@ -84,6 +84,10 @@ export async function launchHeadlessChrome({ width = 1440, height = 900 } = {}) 
       '--disable-renderer-backgrounding',
       '--disable-breakpad',
       '--disable-component-update',
+      // The guest form ships real `autocomplete` tokens. Chrome's autofill controller
+      // wedges the renderer in a fresh throwaway profile, so the automation browser runs
+      // with autofill disabled while the markup keeps its standards-compliant hints.
+      '--disable-features=AutofillServerCommunication,AutofillEnableAccountWalletStorage,AutofillContentSuggestions',
       '--disable-default-apps',
       '--disable-extensions',
       '--disable-hang-monitor',
@@ -145,6 +149,9 @@ export async function launchHeadlessChrome({ width = 1440, height = 900 } = {}) 
     throw new Error(`Chrome did not publish a DevTools WebSocket URL.\n${stderrBuffer}`);
   }
 
+  /** Captured Chrome stderr, surfaced by the suite when a run degrades. */
+  const diagnostics = () => stderrBuffer.slice(-4000);
+
   const close = async () => {
     if (child.exitCode === null) {
       child.kill('SIGTERM');
@@ -158,7 +165,7 @@ export async function launchHeadlessChrome({ width = 1440, height = 900 } = {}) 
     rmSync(userDataDir, { recursive: true, force: true });
   };
 
-  return { endpoint, browserWsUrl: version.webSocketDebuggerUrl, close };
+  return { endpoint, browserWsUrl: version.webSocketDebuggerUrl, close, diagnostics };
 }
 
 /** JSON-RPC client over a DevTools WebSocket, supporting flattened sessions. */
@@ -272,6 +279,7 @@ export class HeadlessPage {
   async enable() {
     await this.send('Page.enable');
     await this.send('Runtime.enable');
+    await this.send('Inspector.enable').catch(() => {});
     await this.send('Log.enable');
     await this.send('Network.enable');
 
@@ -284,6 +292,14 @@ export class HeadlessPage {
         .join(' ')
         .trim();
       this.consoleEntries.push({ level: type, text });
+    });
+
+    this.connection.on('Inspector.targetCrashed', () => {
+      this.pageErrors.push({ level: 'exception', text: 'The page renderer crashed' });
+    });
+
+    this.connection.on('Inspector.detached', () => {
+      this.pageErrors.push({ level: 'exception', text: 'The page session was detached' });
     });
 
     this.connection.on('Runtime.exceptionThrown', ({ exceptionDetails }) => {
@@ -384,21 +400,35 @@ export class HeadlessPage {
     });
   }
 
-  /** Navigates and resolves once the load event has fired. */
+  /**
+   * Navigates and resolves once the load event has fired.
+   *
+   * The load watchdog is always cleared, including on failure, so a stalled navigation
+   * can never surface later as an unhandled rejection after the suite has moved on.
+   */
   async goto(url, { timeout = DEFAULT_TIMEOUT_MS } = {}) {
+    let off = () => {};
+    let timer;
     const loaded = new Promise((resolve, reject) => {
-      const timer = setTimeout(() => {
+      timer = setTimeout(() => {
         off();
         reject(new Error(`Timed out loading ${url}`));
       }, timeout);
-      const off = this.connection.on('Page.loadEventFired', () => {
+      off = this.connection.on('Page.loadEventFired', () => {
         clearTimeout(timer);
         off();
         resolve();
       });
     });
-    await this.send('Page.navigate', { url });
-    await loaded;
+
+    try {
+      await this.send('Page.navigate', { url });
+      await loaded;
+    } catch (error) {
+      clearTimeout(timer);
+      off();
+      throw error;
+    }
   }
 
   /**
@@ -407,12 +437,22 @@ export class HeadlessPage {
    * @param {string} expression JavaScript source evaluated in the page realm.
    * @returns {Promise<unknown>} the serialised result.
    */
-  async evaluate(expression) {
-    const result = await this.send('Runtime.evaluate', {
+  async evaluate(expression, { timeout = DEFAULT_TIMEOUT_MS } = {}) {
+    const evaluation = this.send('Runtime.evaluate', {
       expression: `(async () => { ${expression} })()`,
       returnByValue: true,
       awaitPromise: true,
     });
+    let timer;
+    const result = await Promise.race([
+      evaluation,
+      new Promise((_resolve, reject) => {
+        timer = setTimeout(
+          () => reject(new Error(`Timed out evaluating page script: ${expression.slice(0, 120)}`)),
+          timeout,
+        );
+      }),
+    ]).finally(() => clearTimeout(timer));
     if (result.exceptionDetails) {
       throw new Error(
         `Page evaluation failed: ${
@@ -553,23 +593,34 @@ export class HeadlessPage {
     await this.waitForSelector(selector);
     await this.scrollIntoView(selector);
     await this.click(selector);
-    await this.send('Input.dispatchKeyEvent', {
-      type: 'keyDown',
-      key: 'a',
-      code: 'KeyA',
-      modifiers: 4,
-      windowsVirtualKeyCode: 65,
-      nativeVirtualKeyCode: 65,
-    });
-    await this.send('Input.dispatchKeyEvent', {
-      type: 'keyUp',
-      key: 'a',
-      code: 'KeyA',
-      modifiers: 4,
-      windowsVirtualKeyCode: 65,
-      nativeVirtualKeyCode: 65,
-    });
+
+    // Selection is performed through the DOM rather than a synthetic Ctrl+A. The
+    // DevTools `SelectAll` command leaves the renderer wedged whenever focus has just
+    // moved between fields inside a portal-hosted drawer.
+    await this.evaluate(`
+      const node = document.querySelector(${JSON.stringify(selector)});
+      const field = node && (node.tagName === 'INPUT' || node.tagName === 'TEXTAREA') ? node : node?.querySelector('input, textarea');
+      if (field) { field.focus(); field.select(); }
+      return true;
+    `);
     await this.send('Input.insertText', { text });
+    await sleep(150);
+  }
+
+  /**
+   * Focuses a numeric field, replaces its content and commits it.
+   *
+   * @param {string} selector CSS selector for the Ant Design number input wrapper or the input itself.
+   * @param {string | number} value value to commit.
+   */
+  async fill(selector, value) {
+    await this.type(selector, String(value));
+    await this.evaluate(`
+      const node = document.querySelector(${JSON.stringify(selector)});
+      const field = node && (node.tagName === 'INPUT' || node.tagName === 'TEXTAREA') ? node : node?.querySelector('input, textarea');
+      if (field) { field.dispatchEvent(new FocusEvent('blur', { bubbles: true })); }
+      return true;
+    `);
     await sleep(150);
   }
 

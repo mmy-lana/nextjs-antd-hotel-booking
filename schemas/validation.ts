@@ -1,4 +1,4 @@
-import { z } from 'zod';
+import { z, type ZodError } from 'zod';
 
 export const GuestDetailsSchema = z.object({
   guestId: z.string().optional(),
@@ -71,3 +71,38 @@ export const RoomCreateSchema = z.object({
 export const RoomUpdateSchema = RoomCreateSchema.extend({
   id: z.string().uuid('Valid room UUID required for updates'),
 });
+
+/**
+ * Ant Design compatible error map, keyed by dotted field path.
+ *
+ * Declared here rather than in a component so the bridge stays framework free and can
+ * be exercised by the domain suite without a React runtime.
+ */
+export interface FormFieldError {
+  errors: string[];
+}
+
+/**
+ * Converts a `ZodError` into the error map `antd` Form accepts.
+ *
+ * Both validation paths share one source of truth: the antd `rules` give instant
+ * feedback while typing, and this function applies the authoritative Zod verdict on
+ * submit so a form can never disagree with the domain schema.
+ *
+ * Nested paths such as `guest.email` or `images.0.url` are preserved verbatim, and
+ * multiple issues on one field are collapsed into a single entry.
+ *
+ * @param error the Zod failure raised by `.safeParse()`.
+ * @returns a record of field path to its human readable messages.
+ */
+export function zodIssuesToFieldErrors(error: ZodError): Record<string, FormFieldError> {
+  const fieldErrors: Record<string, FormFieldError> = {};
+  for (const issue of error.issues) {
+    const path = issue.path.map((segment) => String(segment)).join('.');
+    if (path.length === 0) {
+      continue;
+    }
+    fieldErrors[path] = { errors: [...(fieldErrors[path]?.errors ?? []), issue.message] };
+  }
+  return fieldErrors;
+}

@@ -8,11 +8,12 @@ import { useBookingStore } from '@/lib/store/bookingStore';
 import { defaultRooms } from '@/lib/data/seedRooms';
 import { defaultAddons } from '@/lib/data/seedAddons';
 import { seedInventoryStorage } from '@/lib/utils/storage';
-import { checkOccupancyCapacity, filterAvailableRooms } from '@/lib/utils/availability';
+import { checkOccupancyCapacity, checkRoomAvailability } from '@/lib/utils/availability';
 import { HeaderNavbar } from '@/components/organisms/HeaderNavbar';
 import { AddonSelector, type AddonSelectionMap } from '@/components/molecules/AddonSelector';
 import { DateGuestFilterBar } from '@/components/molecules/DateGuestFilterBar';
 import { RoomCard } from '@/components/molecules/RoomCard';
+import { BookingDrawer } from '@/components/organisms/BookingDrawer';
 import { SectionHeader } from '@/components/primitives/SectionHeader';
 import type { Room } from '@/types/booking';
 
@@ -21,6 +22,7 @@ const { Content, Footer } = Layout;
 export default function HomePage() {
   const [hydrated, setHydrated] = useState(false);
   const [conciergeSelections, setConciergeSelections] = useState<AddonSelectionMap>({});
+  const [bookingRoom, setBookingRoom] = useState<Room | null>(null);
   const rooms = useInventoryStore((state) => state.rooms);
   const reservations = useInventoryStore((state) => state.reservations);
   const addons = useInventoryStore((state) => state.addons);
@@ -45,18 +47,29 @@ export default function HomePage() {
   const visibleRooms = useMemo<Array<{ room: Room; unavailableReason: string | null }>>(() => {
     const party = { adults: guests.adults, children: guests.children, infants: 0 };
 
-    // Party size always narrows the catalogue; the calendar only adds a second axis
-    // once the guest has actually chosen a window.
+    // A suite withdrawn for maintenance or housekeeping is never bookable; party size
+    // always narrows the catalogue; the calendar adds a second axis once chosen.
     const bookable = new Set(
-      (dateRange
-        ? filterAvailableRooms(rooms, dateRange[0], dateRange[1], reservations, party)
-        : rooms.filter((room) => checkOccupancyCapacity(room, party).withinCapacity)
-      ).map((room) => room.id),
+      rooms
+        .filter((room) => room.status !== 'MAINTENANCE' && room.status !== 'CLEANING')
+        .filter((room) => checkOccupancyCapacity(room, party).withinCapacity)
+        .filter((room) =>
+          dateRange
+            ? checkRoomAvailability(room, dateRange[0], dateRange[1], reservations).isAvailable
+            : true,
+        )
+        .map((room) => room.id),
     );
 
     return rooms.map((room) => {
       if (bookable.has(room.id)) {
         return { room, unavailableReason: null };
+      }
+      if (room.status === 'MAINTENANCE') {
+        return { room, unavailableReason: 'Withdrawn for maintenance' };
+      }
+      if (room.status === 'CLEANING') {
+        return { room, unavailableReason: 'Housekeeping in progress' };
       }
       const capacity = checkOccupancyCapacity(room, party);
       return {
@@ -158,7 +171,12 @@ export default function HomePage() {
               <Row gutter={[24, 24]} style={{ marginTop: 24 }}>
                 {visibleRooms.map(({ room, unavailableReason }) => (
                   <Col xs={24} md={12} lg={8} key={room.id}>
-                    <RoomCard room={room} unavailableReason={unavailableReason} />
+                    <RoomCard
+                      room={room}
+                      unavailableReason={unavailableReason}
+                      onReserve={setBookingRoom}
+                      reserveDisabled={unavailableReason !== null}
+                    />
                   </Col>
                 ))}
               </Row>
@@ -201,6 +219,15 @@ export default function HomePage() {
           Aura Cove Sanctuary Resort &amp; Spa — est. 2026
         </span>
       </Footer>
+
+      <BookingDrawer
+        open={bookingRoom !== null}
+        room={bookingRoom}
+        onClose={() => setBookingRoom(null)}
+        onReserved={(reservation) => {
+          window.location.href = `/booking/confirmation/${reservation.bookingReference}`;
+        }}
+      />
     </Layout>
   );
 }

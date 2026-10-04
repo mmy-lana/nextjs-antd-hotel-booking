@@ -41,6 +41,36 @@ export function test(name, fn) {
  */
 export const asyncSteps = [];
 
+/** Maximum time a single queued block may run before it is reported as stalled. */
+const TEST_TIMEOUT_MS = 60_000;
+
+/**
+ * Rejects if the supplied promise has not settled within `ms`.
+ *
+ * A browser-driven suite can otherwise stall forever on a single interaction; failing
+ * loudly keeps the remaining blocks runnable and the report honest.
+ *
+ * @param {Promise<unknown>} promise work to await.
+ * @param {number} ms timeout in milliseconds.
+ * @param {string} label name reported in the timeout message.
+ */
+async function withTimeout(promise, ms, label) {
+  let timer;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise((_resolve, reject) => {
+        timer = setTimeout(
+          () => reject(new Error(`Timed out after ${ms}ms: ${label}`)),
+          ms,
+        );
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 /** Queues an asynchronous assertion block under the current suite heading. */
 export function testAsync(name, fn) {
   asyncSteps.push({ suite: currentSuite, name, fn });
@@ -56,12 +86,15 @@ export function testAsync(name, fn) {
 export async function runAsyncTests() {
   while (asyncSteps.length > 0) {
     const block = asyncSteps.shift();
+    const startedAt = Date.now();
+    process.stdout.write(`  ${DIM}running ${block.suite} :: ${block.name}${RESET}\n`);
     try {
-      await block.fn();
+      await withTimeout(block.fn(), TEST_TIMEOUT_MS, block.name);
       results.push({ suite: block.suite, name: block.name, ok: true });
     } catch (error) {
       results.push({ suite: block.suite, name: block.name, ok: false, error });
     }
+    process.stdout.write(`  ${DIM}done    ${block.name} (${Date.now() - startedAt}ms)${RESET}\n`);
   }
 }
 

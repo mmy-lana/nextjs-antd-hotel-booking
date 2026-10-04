@@ -1,0 +1,30 @@
+import { launchHeadlessChrome, openPage } from './scripts/verify/headless-chrome.mjs';
+import { startNextServer } from './scripts/verify/next-server.mjs';
+import dayjs from 'dayjs';
+const server = await startNextServer();
+const browser = await launchHeadlessChrome();
+let page = await openPage(browser.browserWsUrl);
+const fresh = async () => { await page?.close().catch(()=>{}); page = await openPage(browser.browserWsUrl); };
+const step = async (label, fn) => { const t=Date.now(); try { const r = await fn(); console.log(`OK   ${label} (${Date.now()-t}ms)`, r===undefined?'':JSON.stringify(r).slice(0,160)); } catch(e){ console.log(`FAIL ${label} (${Date.now()-t}ms): ${e.message.slice(0,120)}`);} };
+
+await step('goto home', () => page.goto(`${server.origin}/`));
+await step('wait room card', () => page.waitForSelector('[data-room-number="S-204"]'));
+await step('open drawer', async () => { await page.click('[data-room-number="S-204"] [data-testid="room-card-reserve"]'); await page.waitForSelector('[data-testid="booking-drawer"]'); await page.settle(); });
+let arrival = dayjs().startOf('day').add(14,'day'); while (arrival.day() !== 5) arrival = arrival.add(1,'day');
+const pick = async (testId, iso) => { await page.click(`[data-testid="${testId}"]`); await page.waitForSelector('.ant-picker-dropdown:not(.ant-picker-dropdown-hidden)'); await page.settle(400); await page.click(`.ant-picker-dropdown:not(.ant-picker-dropdown-hidden) td[title="${iso}"]`); await page.settle(400); };
+await step('pick dates', async () => { await pick('booking-check-in', arrival.format('YYYY-MM-DD')); await pick('booking-check-out', arrival.add(3,'day').format('YYYY-MM-DD')); });
+await step('submit empty', async () => { await page.click('[data-testid="booking-submit"]'); await page.settle(); });
+await step('errors', () => page.evaluate(`return [...document.querySelectorAll('.ant-form-item-explain-error')].map(n=>n.innerText.trim());`));
+await step('type bad email', () => page.type('[data-testid="booking-email"]', 'not-an-email'));
+await step('errors after', () => page.evaluate(`return [...document.querySelectorAll('.ant-form-item-explain-error')].map(n=>n.innerText.trim());`));
+await step('complete form', async () => {
+  await page.type('[data-testid="booking-email"]', 'amelia.hartwell@example.com');
+  await page.type('[data-testid="booking-first-name"]', 'Amelia');
+  await page.type('[data-testid="booking-last-name"]', 'Hartwell');
+  await page.type('[data-testid="booking-phone"]', '+1 555 0142');
+});
+await step('alive after typing', () => page.evaluate('return 1+1;'));
+await step('fresh page', fresh);
+await step('goto admin', () => page.goto(`${server.origin}/admin/rooms`));
+await step('table', () => page.waitForSelector('[data-testid="room-inventory-table"]'));
+await browser.close(); await server.stop();
