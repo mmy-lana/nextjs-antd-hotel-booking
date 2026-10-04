@@ -191,6 +191,21 @@ function futureWeekendWindow() {
 const STAY = futureWeekendWindow();
 
 /**
+ * Marks the current tab as an authorised staff session.
+ *
+ * `sessionStorage` is scoped to one tab, so a freshly opened page has to authorise
+ * itself before it can reach the console — exactly as a real staff member would.
+ *
+ * @param {object} page active headless page, already navigated to the app origin.
+ */
+async function authoriseStaff(page) {
+  await page.evaluate(`
+    window.sessionStorage.setItem('aura_cove_staff_session', 'active');
+    return true;
+  `);
+}
+
+/**
  * Rewrites the browser's persisted stores to a known snapshot.
  *
  * Scenarios share one browser profile, so an itinerary created by an earlier scenario
@@ -206,6 +221,7 @@ async function resetInventory(page, reservations = []) {
     const rooms = ${JSON.stringify(defaultRooms)};
     const addons = ${JSON.stringify(defaultAddons)};
     window.localStorage.clear();
+    window.sessionStorage.setItem('aura_cove_staff_session', 'active');
     window.localStorage.setItem('resort-inventory-storage', JSON.stringify({
       state: { rooms, reservations: ${JSON.stringify(reservations)}, addons },
       version: 0,
@@ -1691,6 +1707,68 @@ try {
     assertSame(reference, stored, 'the itinerary URL matches the persisted booking reference');
   });
 
+  testAsync('the staff console is gated until a passkey is accepted', async () => {
+    await freshPage();
+    await page.setViewport({ width: 1440, height: 900, mobile: false });
+
+    // A visitor arriving straight at a console URL, with no prior authorisation.
+    await checkPage(
+      async () => {
+        await page.goto(`${server.origin}/admin/rooms`);
+        await page.waitForSelector('[data-testid="admin-passkey"]');
+      },
+      { label: 'the locked console' },
+    );
+
+    const locked = await page.evaluate(`
+      return {
+        heading: document.querySelector('h3') ? document.querySelector('h3').innerText.trim() : null,
+        consoleVisible: Boolean(document.querySelector('[data-testid="room-inventory-table"]')),
+        session: window.sessionStorage.getItem('aura_cove_staff_session'),
+      };
+    `);
+    assertMatch(locked.heading ?? '', /Staff Access Control/i, 'the gate prompts for authorisation');
+    assertFalse(locked.consoleVisible, 'the inventory console is not rendered for an unauthorised visitor');
+    assertSame(locked.session, null, 'no session is created by merely visiting the URL');
+
+    await page.type('[data-testid="admin-passkey"]', 'wrong-passkey');
+    await page.click('[data-testid="admin-authorize"]');
+    await page.waitForSelector('[data-testid="admin-auth-error"]');
+    assertTrue(
+      await page.evaluate(`return window.sessionStorage.getItem('aura_cove_staff_session') === null;`),
+      'a rejected passkey does not open a session',
+    );
+
+    await page.type('[data-testid="admin-passkey"]', 'auracove2026');
+    await page.click('[data-testid="admin-authorize"]');
+    await page.waitForSelector('[data-testid="room-inventory-table"]', { timeout: 15_000 });
+    await page.settle();
+
+    assertTrue(
+      await page.evaluate(`return window.sessionStorage.getItem('aura_cove_staff_session') === 'active';`),
+      'the accepted passkey opens a staff session',
+    );
+
+    // Ending the session re-locks the console.
+    await page.click('[data-testid="admin-sign-out"]');
+    await page.waitForSelector('[data-testid="admin-passkey"]');
+    assertFalse(
+      await page.evaluate(`return Boolean(document.querySelector('[data-testid="room-inventory-table"]'));`),
+      'ending the session hides the console again',
+    );
+  });
+
+  testAsync('the reservation register is gated as well', async () => {
+    await freshPage();
+    await page.setViewport({ width: 1440, height: 900, mobile: false });
+    await page.goto(`${server.origin}/admin/reservations`);
+    await page.waitForSelector('[data-testid="admin-passkey"]');
+    assertFalse(
+      await page.evaluate(`return Boolean(document.querySelector('[data-testid="reservation-register"]'));`),
+      'guest PII in the register is not rendered for an unauthorised visitor',
+    );
+  });
+
   testAsync('the console shell publishes its metrics top bar', async () => {
     await freshPage();
     await resetInventory(page);
@@ -1754,6 +1832,10 @@ try {
           async () => {
             await page.setViewport(viewport);
             await page.goto(`${server.origin}${route.path}`);
+            if (route.path.startsWith('/admin/')) {
+              await authoriseStaff(page);
+              await page.goto(`${server.origin}${route.path}`);
+            }
             await page.waitForSelector('main, body > div');
           },
           { label: `${route.path} at ${viewport.label}` },

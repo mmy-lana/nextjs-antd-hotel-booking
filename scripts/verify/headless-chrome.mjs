@@ -556,9 +556,21 @@ export class HeadlessPage {
   async click(selector, { timeout = DEFAULT_TIMEOUT_MS } = {}) {
     await this.waitForSelector(selector, { timeout, visible: true });
     await this.scrollIntoView(selector);
-    const box = await this.boxOf(selector);
-    if (!box || box.width === 0 || box.height === 0) {
-      throw new Error(`Element is not clickable: ${selector}`);
+
+    // A responsive control can be swapped out by React between the scroll and the
+    // measurement (breakpoint resolution, hydration), so poll for a settled box.
+    let box = null;
+    const settleDeadline = Date.now() + 3_000;
+    while (Date.now() < settleDeadline) {
+      const candidate = await this.boxOf(selector);
+      if (candidate && candidate.width > 0 && candidate.height > 0) {
+        box = candidate;
+        break;
+      }
+      await sleep(120);
+    }
+    if (!box) {
+      throw new Error(`Element never became clickable: ${selector}`);
     }
     const x = box.x + box.width / 2;
     const y = box.y + box.height / 2;

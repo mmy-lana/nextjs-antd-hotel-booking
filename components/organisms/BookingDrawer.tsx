@@ -7,7 +7,7 @@ import type { FormInstance, Rule } from 'antd/es/form';
 import { useInventoryStore } from '@/lib/store/inventoryStore';
 import { useBookingStore } from '@/lib/store/bookingStore';
 import { calculateReservationQuote } from '@/lib/utils/pricingEngine';
-import { checkOccupancyCapacity, checkRoomAvailability } from '@/lib/utils/availability';
+import { checkOccupancyCapacity, checkRoomAvailability, isValidStayRange } from '@/lib/utils/availability';
 import { deriveGuestId } from '@/lib/utils/storage';
 import { GuestDetailsSchema, ReservationSubmissionSchema, zodIssuesToFieldErrors } from '@/schemas/validation';
 import { AddonSelector, type AddonSelectionMap } from '@/components/molecules/AddonSelector';
@@ -157,7 +157,14 @@ export function BookingDrawer({ open, room, onClose, onReserved }: BookingDrawer
     if (!room || !hasDates) {
       return null;
     }
-    return calculateReservationQuote(room, (checkIn as Dayjs).format('YYYY-MM-DD'), (checkOut as Dayjs).format('YYYY-MM-DD'), selectedAddons);
+    const arrival = (checkIn as Dayjs).format('YYYY-MM-DD');
+    const departure = (checkOut as Dayjs).format('YYYY-MM-DD');
+    // The engine rejects a window that cannot be billed, so only quote a valid stay
+    // rather than letting an invariant violation surface from inside render.
+    if (!isValidStayRange(arrival, departure)) {
+      return null;
+    }
+    return calculateReservationQuote(room, arrival, departure, selectedAddons);
   }, [checkIn, checkOut, hasDates, room, selectedAddons]);
 
   const availability = useMemo(() => {
@@ -336,13 +343,14 @@ export function BookingDrawer({ open, room, onClose, onReserved }: BookingDrawer
     totalNights,
   ]);
 
+  // `width` is deprecated on Ant Design v6; `size` carries the panel extent instead.
   const width = screens.xl ? 560 : screens.md ? 480 : '100%';
 
   return (
     <Drawer
       open={open}
       onClose={onClose}
-      width={width}
+      size={width}
       placement="right"
       destroyOnHidden={false}
       title={

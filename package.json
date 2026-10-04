@@ -10,7 +10,8 @@
     "typecheck": "tsc --noEmit",
     "verify:domain": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --import ./scripts/verify/register-aliases.mjs ./scripts/verify/domain-suite.mjs",
     "verify:ui": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --import ./scripts/verify/register-aliases.mjs ./scripts/verify/ui-suite.mjs",
-    "verify": "pnpm run typecheck && pnpm run verify:domain && pnpm run verify:ui"
+    "verify": "pnpm run typecheck && pnpm run verify:domain && pnpm run verify:ui && pnpm run verify:dev",
+    "verify:dev": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --import ./scripts/verify/register-aliases.mjs ./scripts/verify/dev-warning-check.mjs"
   },
   "dependencies": {
     "@ant-design/icons": "latest",

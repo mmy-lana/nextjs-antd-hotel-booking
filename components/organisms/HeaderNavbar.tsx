@@ -130,10 +130,12 @@ export function HeaderNavbar({ items = DEFAULT_NAV_ITEMS, className }: HeaderNav
         </nav>
       )}
 
+      {/* `width` is deprecated on Ant Design v6 in favour of `size`, which maps to the
+          wrapper width for left/right placement and accepts strings such as `100%`. */}
       <Drawer
         title="Aura Cove"
         placement="right"
-        width="100%"
+        size="100%"
         open={drawerOpen}
         onClose={closeDrawer}
         data-testid="navbar-drawer"

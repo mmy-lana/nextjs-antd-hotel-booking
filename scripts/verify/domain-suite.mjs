@@ -17,7 +17,7 @@ import { attachWindow, detachWindow, installMemoryStorage, resetMemoryStorage } 
 
 import { defaultRooms } from '@/lib/data/seedRooms';
 import { defaultAddons } from '@/lib/data/seedAddons';
-import { calculateReservationQuote } from '@/lib/utils/pricingEngine';
+import { calculateReservationQuote, InvalidStayRangeError } from '@/lib/utils/pricingEngine';
 import {
   checkOccupancyCapacity,
   checkRoomAvailability,
@@ -159,10 +159,45 @@ test('multiplies per-night addon charges by guest quantity and night count', () 
   assertSame(quote.addonsSubtotal, 85 * 3 * 3, 'quantity multiplies the nightly unit price');
 });
 
-test('floors a same-day range to a single night instead of producing a zero stay', () => {
-  const quote = calculateReservationQuote(CLIFFSIDE, '2026-03-06', '2026-03-06', []);
-  assertSame(quote.totalNights, 1, 'a degenerate range still bills one night');
-  assertTrue(quote.grandTotal > 0, 'a degenerate range still produces a payable total');
+test('rejects a same-day or inverted date range instead of billing a phantom night', () => {
+  const sameDay = assertThrows(
+    () => calculateReservationQuote(CLIFFSIDE, '2026-03-06', '2026-03-06', []),
+    'a same-day range must be rejected',
+    'Check-out date must be strictly after check-in date',
+  );
+  assertSame(sameDay.name, 'InvalidStayRangeError', 'the failure is a typed, catchable error');
+
+  assertThrows(
+    () => calculateReservationQuote(CLIFFSIDE, '2026-03-10', '2026-03-06', []),
+    'an inverted range must be rejected',
+    'Check-out date must be strictly after check-in date',
+  );
+
+  assertThrows(
+    () => calculateReservationQuote(CLIFFSIDE, 'not-a-date', '2026-03-06', []),
+    'an unparseable arrival date must be rejected',
+    'Check-out date must be strictly after check-in date',
+  );
+});
+
+test('rounds every ledger line to whole currency units', () => {
+  const quote = calculateReservationQuote(CLIFFSIDE, '2026-03-02', '2026-03-05', []);
+  for (const line of [
+    quote.baseRoomSubtotal,
+    quote.weekendSurchargeSubtotal,
+    quote.resortFeeTotal,
+    quote.cleaningFee,
+    quote.addonsSubtotal,
+    quote.subtotal,
+    quote.serviceCharge,
+    quote.occupancyTax,
+    quote.taxesTotal,
+    quote.grandTotal,
+  ]) {
+    assertTrue(Number.isInteger(line), `every ledger line must be a whole unit (got ${line})`);
+  }
+  assertSame(quote.serviceCharge, Math.round((quote.subtotal * 10) / 100), 'service charge uses the integer ratio');
+  assertSame(quote.occupancyTax, Math.round((quote.subtotal * 8) / 100), 'occupancy tax uses the integer ratio');
 });
 
 test('keeps tax lines and the grand total internally consistent', () => {

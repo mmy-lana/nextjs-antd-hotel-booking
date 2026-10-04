@@ -32,15 +32,19 @@ export async function findFreePort() {
  * @param {object} [options]
  * @param {number} [options.port] port to bind; an ephemeral port is chosen when omitted.
  * @param {number} [options.readyTimeoutMs] milliseconds to wait for readiness.
+ * @param {boolean} [options.dev] run `next dev` instead of `next start`. Development mode
+ *   keeps Ant Design's deprecation warnings, which production builds strip.
  * @returns {Promise<{ origin: string, stop: () => Promise<void>, output: () => string }>} the running server handle.
  */
-export async function startNextServer({ port, readyTimeoutMs = 90_000 } = {}) {
+export async function startNextServer({ port, readyTimeoutMs = 90_000, dev = false } = {}) {
   const chosenPort = port ?? (await findFreePort());
   const origin = `http://127.0.0.1:${chosenPort}`;
 
   const child = spawn(
     path.join(PROJECT_ROOT, 'node_modules', '.bin', 'next'),
-    ['start', '--hostname', '127.0.0.1', '--port', String(chosenPort)],
+    dev
+      ? ['dev', '--hostname', '127.0.0.1', '--port', String(chosenPort)]
+      : ['start', '--hostname', '127.0.0.1', '--port', String(chosenPort)],
     { cwd: PROJECT_ROOT, stdio: ['ignore', 'pipe', 'pipe'] },
   );
 

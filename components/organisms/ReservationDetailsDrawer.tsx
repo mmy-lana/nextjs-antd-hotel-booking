@@ -105,10 +105,11 @@ export function ReservationDetailsDrawer({
   };
 
   return (
+    /* `width` is deprecated on Ant Design v6 in favour of `size`. */
     <Drawer
       open={open}
       onClose={onClose}
-      width="min(520px, 100vw)"
+      size="min(520px, 100vw)"
       placement="right"
       title={
         <span style={{ fontFamily: 'var(--font-display)', fontSize: 22 }}>

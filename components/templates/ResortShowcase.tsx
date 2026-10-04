@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import dayjs from 'dayjs';
 import { Button, Col, Empty, Layout, Row, Spin } from 'antd';
 import { useInventoryStore } from '@/lib/store/inventoryStore';
@@ -108,9 +109,16 @@ export function ResortShowcase() {
     });
   }, []);
 
-  const handleReserved = useCallback((reservation: { bookingReference: string }) => {
-    window.location.href = `/booking/confirmation/${reservation.bookingReference}`;
-  }, []);
+  // Client-side transition keeps the SPA shell and the in-memory inventory alive
+  // across checkout, instead of forcing a full document reload.
+  const router = useRouter();
+
+  const handleReserved = useCallback(
+    (reservation: { bookingReference: string }) => {
+      router.push(`/booking/confirmation/${reservation.bookingReference}`);
+    },
+    [router],
+  );
 
   return (
     <Layout style={{ minHeight: '100vh', background: 'var(--resort-sand)' }}>
