@@ -13,6 +13,14 @@ import { HeaderNavbar, DEFAULT_NAV_ITEMS } from '@/components/organisms/HeaderNa
 
 const { Content, Footer } = Layout;
 
+/** A single figure in the console metrics top-bar. */
+export interface ConsoleMetric {
+  label: string;
+  value: string;
+  /** Optional supporting line, e.g. a share of inventory. */
+  hint?: string;
+}
+
 export interface AdminConsoleShellProps {
   /** Page eyebrow, e.g. `Front office`. */
   eyebrow: string;
@@ -22,6 +30,8 @@ export interface AdminConsoleShellProps {
   description?: string;
   /** Trailing controls rendered beside the page title. */
   actions?: ReactNode;
+  /** Occupancy and revenue figures rendered as a top bar; omitted renders no bar. */
+  metrics?: ConsoleMetric[];
   /** Page body. */
   children: ReactNode;
   /** Navigation highlighted as current; defaults to the section matching the pathname. */
@@ -47,6 +57,7 @@ export function AdminConsoleShell({
   title,
   description,
   actions,
+  metrics,
   children,
   activeSection,
 }: AdminConsoleShellProps) {
@@ -114,6 +125,47 @@ export function AdminConsoleShell({
       </div>
 
       <Content style={{ maxWidth: 1200, margin: '0 auto', padding: '32px 24px 72px', width: '100%' }}>
+        {metrics && metrics.length > 0 ? (
+          <dl
+            data-testid="console-metrics"
+            style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))',
+              gap: 1,
+              marginBottom: 28,
+              border: '1px solid var(--resort-border)',
+              borderRadius: 'var(--resort-radius-lg)',
+              overflow: 'hidden',
+              background: 'var(--resort-border-soft)',
+            }}
+          >
+            {metrics.map((metric) => (
+              <div key={metric.label} style={{ background: 'var(--resort-paper)', padding: '16px 18px' }}>
+                <dt className="resort-eyebrow resort-eyebrow--muted" style={{ fontSize: 10 }}>
+                  {metric.label}
+                </dt>
+                <dd
+                  style={{
+                    margin: '6px 0 0',
+                    fontFamily: 'var(--font-display)',
+                    fontSize: 26,
+                    lineHeight: 1.15,
+                    color: 'var(--resort-espresso)',
+                    fontVariantNumeric: 'tabular-nums',
+                  }}
+                >
+                  {metric.value}
+                </dd>
+                {metric.hint ? (
+                  <span style={{ display: 'block', marginTop: 4, fontSize: 12, color: 'var(--resort-stone)' }}>
+                    {metric.hint}
+                  </span>
+                ) : null}
+              </div>
+            ))}
+          </dl>
+        ) : null}
+
         <div
           style={{
             display: 'flex',

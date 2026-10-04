@@ -1,9 +1,11 @@
 'use client';
 
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
+import dayjs from 'dayjs';
 import { App } from 'antd';
 import { useInventoryStore } from '@/lib/store/inventoryStore';
-import { AdminConsoleShell } from '@/components/templates/AdminConsoleShell';
+import { AdminConsoleShell, type ConsoleMetric } from '@/components/templates/AdminConsoleShell';
+import { reservationsSpanningDate } from '@/lib/utils/availability';
 import { RoomInventoryTable } from '@/components/organisms/RoomInventoryTable';
 import { RoomEditorModal, type RoomEditorPayload } from '@/components/organisms/RoomEditorModal';
 import type { Room, RoomStatus } from '@/types/booking';
@@ -46,6 +48,43 @@ export default function AdminRoomsPage() {
 
   const [editorOpen, setEditorOpen] = useState(false);
   const [editingRoom, setEditingRoom] = useState<Room | null>(null);
+
+  const today = useMemo(() => dayjs().format('YYYY-MM-DD'), []);
+
+  const metrics = useMemo<ConsoleMetric[]>(() => {
+    const occupiedTonight = rooms.filter(
+      (room) => reservationsSpanningDate(room.id, today, reservations).length > 0,
+    ).length;
+    const bookable = rooms.filter(
+      (room) => room.status === 'AVAILABLE' || room.status === 'RESERVED',
+    ).length;
+    const withdrawn = rooms.filter(
+      (room) => room.status === 'MAINTENANCE' || room.status === 'CLEANING',
+    ).length;
+    const arrivals = reservations.filter((reservation) => {
+      const status = reservation.status;
+      return (
+        reservation.checkInDate <= today &&
+        reservation.checkOutDate > today &&
+        status !== 'CANCELLED' &&
+        status !== 'CHECKED_OUT'
+      );
+    }).length;
+    const nightlyRevenue = reservations
+      .filter((reservation) => reservation.status !== 'CANCELLED')
+      .reduce((sum, reservation) => sum + reservation.pricing.grandTotal, 0);
+
+    return [
+      { label: 'In inventory', value: String(rooms.length), hint: `${bookable} bookable` },
+      { label: 'Occupied tonight', value: String(occupiedTonight), hint: `${arrivals} in house` },
+      { label: 'Withdrawn', value: String(withdrawn), hint: 'Maintenance or housekeeping' },
+      {
+        label: 'Booked value',
+        value: `$${nightlyRevenue.toLocaleString('en-US')}`,
+        hint: 'Across all live itineraries',
+      },
+    ];
+  }, [reservations, rooms, today]);
 
   const openCreate = useCallback(() => {
     setEditingRoom(null);
@@ -111,6 +150,7 @@ export default function AdminRoomsPage() {
       title="Suite inventory"
       description="Maintain operational status, nightly rates and catalogue details for every residence."
       activeSection="/admin/rooms"
+      metrics={metrics}
     >
       <RoomInventoryTable
         rooms={rooms}

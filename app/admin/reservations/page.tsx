@@ -5,7 +5,7 @@ import dayjs, { type Dayjs } from 'dayjs';
 import { App, Button, DatePicker, Empty, Input, Select, Table } from 'antd';
 import type { TableColumnsType } from 'antd';
 import { useInventoryStore } from '@/lib/store/inventoryStore';
-import { AdminConsoleShell } from '@/components/templates/AdminConsoleShell';
+import { AdminConsoleShell, type ConsoleMetric } from '@/components/templates/AdminConsoleShell';
 import { ReservationDetailsDrawer } from '@/components/organisms/ReservationDetailsDrawer';
 import { ReservationStatusBadge, PaymentStatusBadge } from '@/components/primitives/StatusBadge';
 import { isDateRangeOverlapping } from '@/lib/utils/availability';
@@ -64,6 +64,28 @@ export default function AdminReservationsPage() {
     () => reservations.find((reservation) => reservation.id === selectedId) ?? null,
     [reservations, selectedId],
   );
+
+  const metrics = useMemo<ConsoleMetric[]>(() => {
+    const today = dayjs().format('YYYY-MM-DD');
+    const live = reservations.filter(
+      (reservation) => reservation.status !== 'CANCELLED' && reservation.status !== 'CHECKED_OUT',
+    );
+    const inHouse = live.filter(
+      (reservation) => reservation.checkInDate <= today && reservation.checkOutDate > today,
+    ).length;
+    const arriving = live.filter((reservation) => reservation.checkInDate === today).length;
+    const value = live.reduce((sum, reservation) => sum + reservation.pricing.grandTotal, 0);
+
+    return [
+      { label: 'Live itineraries', value: String(live.length), hint: `${reservations.length} total recorded` },
+      { label: 'In house tonight', value: String(inHouse), hint: `${arriving} arriving today` },
+      {
+        label: 'Booked value',
+        value: `$${value.toLocaleString('en-US')}`,
+        hint: 'Excludes cancelled and departed stays',
+      },
+    ];
+  }, [reservations]);
 
   const columns: TableColumnsType<Reservation> = [
     {
@@ -181,6 +203,7 @@ export default function AdminReservationsPage() {
       title="Reservation register"
       description="Every itinerary captured through the guest site, with folio totals and the actions available for its current state."
       activeSection="/admin/reservations"
+      metrics={metrics}
     >
       <div
         style={{

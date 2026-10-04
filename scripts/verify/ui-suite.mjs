@@ -69,15 +69,15 @@ async function freshPage() {
 }
 
 /**
- * Routes that later phases of `plan.md` introduce.
+ * Route prefixes that are knowingly absent.
  *
- * The App Router prefetches every `<Link>` target on hydration, so a scaffold link to a
- * route that a later phase still has to build produces an `?_rsc=` 404. Those prefetch
- * misses are tracked here so the suite can assert on everything that *is* implemented
- * while still failing loudly on a genuine broken link or script error. Each prefix is
- * removed from this list as soon as its phase lands.
+ * The App Router prefetches every `<Link>` target on hydration, so a link to a route a
+ * later phase still has to build produces an `?_rsc=` 404. Those prefetch misses are
+ * tracked here so the suite can assert on everything that *is* implemented while still
+ * failing loudly on a genuine broken link or script error. Each prefix is added as its
+ * phase introduces the link and removed once the route exists.
  */
-const PHASE_PLANNED_ROUTE_PREFIXES = ['/rooms/', '/booking/'];
+const PHASE_PLANNED_ROUTE_PREFIXES = [];
 
 /** @param {string} pathname route path, without its query string. */
 function isPhasePlannedRoute(pathname) {
@@ -97,10 +97,16 @@ function isPlannedRoutePrefetchMiss({ text }) {
 }
 
 /** Runs the body with diagnostics cleared, failing the test on any console error. */
-async function checkPage(run, { label }) {
+async function checkPage(run, { label, allowStatuses = [] }) {
   page.resetDiagnostics();
   await run();
-  const diagnostics = page.fatalDiagnostics(isPlannedRoutePrefetchMiss);
+  const isExpected = (entry) => {
+    const status = /status of (\d{3})/.exec(entry.text)?.[1];
+    return status !== undefined && allowStatuses.includes(status);
+  };
+  const diagnostics = page
+    .fatalDiagnostics(isPlannedRoutePrefetchMiss)
+    .filter((entry) => !isExpected(entry));
   assertEqual(diagnostics, [], `console must be clean on ${label}`);
 }
 
@@ -253,6 +259,16 @@ async function createReservationThroughUi(page, roomNumber = 'V-101') {
   }
   return reference;
 }
+
+/** The viewport matrix every responsive assertion sweeps. */
+const VIEWPORTS = [
+  { label: 'Mobile S 360', width: 360, height: 780, mobile: true },
+  { label: 'Mobile M 390', width: 390, height: 844, mobile: true },
+  { label: 'Mobile L 430', width: 430, height: 932, mobile: true },
+  { label: 'Tablet 768', width: 768, height: 1024, mobile: true },
+  { label: 'Desktop 1024', width: 1024, height: 768, mobile: false },
+  { label: 'Desktop 1440', width: 1440, height: 900, mobile: false },
+];
 
 try {
   /* ------------------------------------------------------------------ */
@@ -1361,16 +1377,414 @@ try {
   });
 
   /* ------------------------------------------------------------------ */
-  suite('Responsive shell — Phase 1 baseline');
+  suite('Phase 5 — page assembly');
 
-  const VIEWPORTS = [
-    { label: 'Mobile S 360', width: 360, height: 780, mobile: true },
-    { label: 'Mobile M 390', width: 390, height: 844, mobile: true },
-    { label: 'Mobile L 430', width: 430, height: 932, mobile: true },
-    { label: 'Tablet 768', width: 768, height: 1024, mobile: true },
-    { label: 'Desktop 1024', width: 1024, height: 768, mobile: false },
-    { label: 'Desktop 1440', width: 1440, height: 900, mobile: false },
+  testAsync('the landing page renders the hero, catalogue and concierge sections', async () => {
+    await checkPage(
+      async () => {
+        await page.setViewport({ width: 1440, height: 900, mobile: false });
+        await page.goto(`${server.origin}/`);
+        await page.waitForSelector('[data-testid="result-count"]');
+      },
+      { label: 'the guest landing page' },
+    );
+
+    const showcase = await page.evaluate(`
+      return {
+        heading: document.querySelector('#showcase-heading') ? document.querySelector('#showcase-heading').innerText.trim() : null,
+        heroStats: [...document.querySelectorAll('section dl dt')].map((node) => node.innerText.trim()),
+        hasFilterBar: Boolean(document.querySelector('[data-testid="date-guest-filter-bar"]')),
+        hasConcierge: Boolean(document.querySelector('[data-testid="addon-selector"]')),
+        resultCount: document.querySelector('[data-testid="result-count"]').innerText.trim(),
+        cards: document.querySelectorAll('[data-testid="room-card"]').length,
+      };
+    `);
+    assertSame(showcase.heading, 'Curated Coastal Residences', 'the hero heading is rendered');
+    assertTrue(
+      showcase.heroStats.some((label) => /^residences$/i.test(label)),
+      'the hero publishes a residence count',
+    );
+    assertTrue(
+      showcase.heroStats.some((label) => /^concierge services$/i.test(label)),
+      'the hero publishes the concierge count',
+    );
+    assertTrue(showcase.hasFilterBar, 'the search bar is part of the landing page');
+    assertTrue(showcase.hasConcierge, 'the concierge section is part of the landing page');
+    assertMatch(showcase.resultCount, /^4 of 4 residences available$/i, 'every suite starts available');
+    assertSame(showcase.cards, 4, 'every suite is listed');
+  });
+
+  testAsync('an empty search offers a single-click reset', async () => {
+    await page.setViewport({ width: 1440, height: 900, mobile: false });
+    await page.goto(`${server.origin}/`);
+    await page.waitForSelector('[data-testid="result-count"]');
+
+    // A party of twelve adults exceeds every suite in the catalogue.
+    await page.click('[data-testid="guest-trigger"]');
+    await page.waitForSelector('[data-testid="guest-panel"]');
+    await page.settle();
+    for (let press = 0; press < 10; press += 1) {
+      await page.click('[data-testid="guest-adults-increment"]');
+    }
+    await page.goto(`${server.origin}/`);
+    await page.waitForSelector('[data-testid="empty-results"]', { timeout: 15_000 });
+
+    const empty = await page.evaluate(`
+      return document.querySelector('[data-testid="empty-results"]').innerText.replace(/\\n+/g, ' | ');
+    `);
+    assertMatch(empty, /No sanctuaries found for selected dates/i, 'the empty state explains itself');
+
+    await page.click('[data-testid="empty-reset"]');
+    await page.goto(`${server.origin}/`);
+    await page.waitForSelector('[data-testid="result-count"]');
+    assertMatch(
+      await page.evaluate('return document.querySelector(\'[data-testid="result-count"]\').innerText;'),
+      /^4 of 4 residences available$/i,
+      'the reset action restores the full catalogue',
+    );
+  });
+
+  testAsync('the suite page renders its gallery, amenities and booking rail', async () => {
+    await checkPage(
+      async () => {
+        await page.setViewport({ width: 1440, height: 900, mobile: false });
+        await page.goto(`${server.origin}/rooms/the-cliffside-sanctuary`);
+        await page.waitForSelector('[data-testid="booking-rail"]');
+      },
+      { label: 'the cliffside suite page' },
+    );
+
+    const suite = await page.evaluate(`
+      return {
+        title: document.querySelector('h1') ? document.querySelector('h1').innerText.trim() : null,
+        gallerySlides: [...new Set([...document.querySelectorAll('[data-testid="suite-gallery-image"]')]
+          .map((node) => node.getAttribute('src')))].length,
+        specs: [...document.querySelectorAll('[data-testid="room-spec-grid"] dd')].map((node) => node.innerText.trim()),
+        amenities: [...document.querySelectorAll('[data-testid="amenity-row"]')].map((node) => node.innerText.split('\\n')[0].trim()),
+        rail: document.querySelector('[data-testid="booking-rail"]').innerText,
+        railPosition: window.getComputedStyle(document.querySelector('[data-testid="booking-rail"]')).position,
+        desktopCta: document.querySelectorAll('[data-testid="suite-reserve"]').length,
+        mobileCta: getComputedStyle(document.querySelector('.mobile-sticky-action')).display,
+      };
+    `);
+
+    assertSame(suite.title, 'The Cliffside Sanctuary', 'the suite title is rendered');
+    assertSame(suite.gallerySlides, 2, 'both showcase images are in the gallery');
+    assertEqual(
+      suite.specs,
+      ['280 m²', '1 King Bed + 1 Daybed Lounge', 'Panoramic Cliff', '3 adults · 1 child · 1 infant'],
+      'the detailed specification grid is rendered',
+    );
+    assertEqual(
+      suite.amenities,
+      ['Private Infinity Pool', 'Dedicated Butler', 'Wine Cellar Cabinet', 'Deep Soaking Marble Tub'],
+      'the full amenity inventory is rendered',
+    );
+    assertMatch(suite.rail, /from/i, 'the booking rail quotes the nightly rate');
+    assertMatch(suite.rail, /10% resort service charge/i, 'the rail discloses the service charge');
+    assertSame(suite.railPosition, 'sticky', 'the rail is sticky on desktop');
+    assertSame(suite.desktopCta, 1, 'the desktop call to action is rendered');
+    assertSame(suite.mobileCta, 'none', 'the mobile bottom bar is hidden on desktop');
+  });
+
+  testAsync('the suite page swaps the rail for a fixed bottom bar on mobile', async () => {
+    await checkPage(
+      async () => {
+        await page.setViewport({ width: 390, height: 844, mobile: true });
+        await page.goto(`${server.origin}/rooms/the-celestial-penthouse`);
+        await page.waitForSelector('[data-testid="suite-reserve-mobile"]');
+      },
+      { label: 'the penthouse suite page at 390px' },
+    );
+
+    const mobile = await page.evaluate(`
+      const bar = document.querySelector('.mobile-sticky-action');
+      const cta = document.querySelector('[data-testid="suite-reserve-mobile"]');
+      const style = window.getComputedStyle(bar);
+      return {
+        position: style.position,
+        bottomGap: window.innerHeight - cta.getBoundingClientRect().bottom,
+        height: Math.round(cta.getBoundingClientRect().height),
+        desktopRail: Boolean(document.querySelector('[data-testid="booking-rail"]')),
+        paddingBottom: style.paddingBottom,
+      };
+    `);
+    assertSame(mobile.position, 'fixed', 'the mobile action bar is pinned to the viewport');
+    assertTrue(mobile.bottomGap < 24, `the call to action sits within thumb reach (${Math.round(mobile.bottomGap)}px from the bottom)`);
+    assertTrue(mobile.height >= 44, 'the mobile call to action keeps a 44px touch height');
+    assertTrue(mobile.desktopRail, 'the booking rail is still rendered for wide viewports');
+  });
+
+  testAsync('the suite page opens the booking drawer from either call to action', async () => {
+    await page.setViewport({ width: 390, height: 844, mobile: true });
+    await page.goto(`${server.origin}/rooms/the-banyan-garden-pavilion`);
+    await page.waitForSelector('[data-testid="suite-reserve-mobile"]');
+
+    await page.click('[data-testid="suite-reserve-mobile"]');
+    await page.waitForSelector('[data-testid="booking-drawer"]');
+    await page.settle();
+
+    const drawer = await page.evaluate(`
+      return document.querySelector('[data-testid="booking-drawer"]').innerText;
+    `);
+    assertMatch(drawer, /The Banyan Garden Pavilion/, 'the drawer is scoped to the suite being viewed');
+    assertMatch(drawer, /Confirm reservation/i, 'the drawer offers the confirm action');
+  });
+
+  testAsync('an unknown suite slug renders the resort 404 with a way back', async () => {
+    await freshPage();
+    await checkPage(
+      async () => {
+        await page.setViewport({ width: 1440, height: 900, mobile: false });
+        await page.goto(`${server.origin}/rooms/the-lighthouse-loft`);
+        await page.waitForSelector('[data-testid="not-found-home"]');
+      },
+      // The document itself reports a 404, which is the behaviour under test.
+      { label: 'the unknown suite page', allowStatuses: ['404'] },
+    );
+
+    const body = await page.evaluate('return document.body.innerText;');
+    assertMatch(body, /Residence not found/i, 'the unknown slug reports a not-found heading');
+    assertMatch(body, /not part of the collection/i, 'the 404 is written in the resort voice');
+    assertMatch(body, /Return to the catalogue/i, 'the 404 offers a way back to the catalogue');
+  });
+
+  testAsync('a suite withdrawn from the catalogue explains itself', async () => {
+    await freshPage();
+    await page.goto(`${server.origin}/`);
+    await page.evaluate(`
+      const raw = window.localStorage.getItem('resort-inventory-storage');
+      const parsed = raw ? JSON.parse(raw) : null;
+      if (parsed) {
+        parsed.state.rooms = parsed.state.rooms.filter((room) => room.roomNumber !== 'V-101');
+        window.localStorage.setItem('resort-inventory-storage', JSON.stringify(parsed));
+      }
+      return true;
+    `);
+
+    await checkPage(
+      async () => {
+        await page.goto(`${server.origin}/rooms/the-cliffside-sanctuary`);
+        await page.waitForSelector('.ant-empty-description');
+      },
+      { label: 'a withdrawn suite page' },
+    );
+
+    const body = await page.evaluate('return document.body.innerText;');
+    assertMatch(body, /no longer listed/i, 'a withdrawn suite renders a helpful empty state');
+    assertMatch(body, /Return to the catalogue/i, 'the empty state offers a way back');
+  });
+
+  testAsync('the itinerary pass renders the folio with distinct tax lines', async () => {
+    await freshPage();
+    await resetInventory(page);
+    await page.setViewport({ width: 1440, height: 900, mobile: false });
+    const reference = await createReservationThroughUi(page, 'V-101');
+
+    await checkPage(
+      async () => {
+        await page.goto(`${server.origin}/booking/confirmation/${reference}`);
+        await page.waitForSelector('[data-testid="itinerary-pass"]');
+      },
+      { label: 'the itinerary pass' },
+    );
+
+    const itinerary = await page.evaluate(`
+      const pass = document.querySelector('[data-testid="itinerary-pass"]');
+      return {
+        reference: pass.querySelector('h1').parentElement.innerText,
+        folio: [...pass.querySelectorAll('[data-testid="itinerary-folio"] dt, [data-testid="itinerary-folio"] dd')]
+          .map((node) => node.innerText.trim()),
+        total: pass.querySelector('[data-testid="itinerary-total"]').innerText.trim(),
+        stay: pass.querySelector('[data-testid="itinerary-stay"]').innerText.trim(),
+        printButton: Boolean(pass.querySelector('[data-testid="print-itinerary"]')),
+      };
+    `);
+
+    assertMatch(itinerary.reference, new RegExp(reference), 'the voucher shows the booking reference');
+    assertTrue(
+      itinerary.folio.some((line) => /service charge \(10%\)/i.test(line)),
+      'the service charge is itemised separately',
+    );
+    assertTrue(
+      itinerary.folio.some((line) => /tourism tax \(8%\)/i.test(line)),
+      'the occupancy tax is itemised separately',
+    );
+    assertTrue(
+      itinerary.folio.some((line) => /Nightly rate/.test(line)),
+      'the nightly rate is itemised',
+    );
+    assertMatch(itinerary.stay, /3 nights/, 'the stay window and night count are shown');
+    assertMatch(itinerary.total, /^\$5,340$/, 'the total paid matches the quoted folio');
+    assertTrue(itinerary.printButton, 'the voucher offers a print action');
+  });
+
+  testAsync('the itinerary print stylesheet drops the navigation and actions', async () => {
+    await freshPage();
+    await resetInventory(page);
+    await page.setViewport({ width: 1440, height: 900, mobile: false });
+    const printable = await createReservationThroughUi(page, 'V-101');
+    await page.goto(`${server.origin}/booking/confirmation/${printable}`);
+    await page.waitForSelector('[data-testid="itinerary-pass"]');
+
+    const printRules = await page.evaluate(`
+      const sheets = [...document.styleSheets];
+      const rules = [];
+      for (const sheet of sheets) {
+        let list;
+        try { list = sheet.cssRules; } catch { continue; }
+        for (const rule of list) {
+          if (rule.media && String(rule.media.mediaText).includes('print')) {
+            rules.push(rule.cssText);
+          }
+        }
+      }
+      return rules.join('\\n');
+    `);
+    assertMatch(printRules, /\.no-print/, 'a print rule hides the interactive chrome');
+    assertMatch(printRules, /\.itinerary-pass/, 'a print rule styles the voucher itself');
+
+    const hidden = await page.evaluate(`
+      const actions = document.querySelector('[data-testid="print-itinerary"]');
+      return actions.closest('.no-print') !== null;
+    `);
+    assertTrue(hidden, 'the print action lives inside the hidden chrome region');
+  });
+
+  testAsync('an itinerary reference unknown to this device explains itself', async () => {
+    await checkPage(
+      async () => {
+        await page.setViewport({ width: 1440, height: 900, mobile: false });
+        await page.goto(`${server.origin}/booking/confirmation/RES-0000000000`);
+        await page.waitForSelector('.ant-empty-description');
+      },
+      { label: 'the unknown itinerary page' },
+    );
+
+    const body = await page.evaluate('return document.body.innerText;');
+    assertMatch(body, /Itinerary not found on this device/i, 'the missing itinerary renders a helpful empty state');
+    assertMatch(body, /concierge desk/i, 'the empty state points the guest to the concierge');
+  });
+
+  testAsync('a completed booking redirects the guest to their itinerary', async () => {
+    await freshPage();
+    await resetInventory(page);
+    await page.setViewport({ width: 1440, height: 900, mobile: false });
+
+    await openBookingDrawer(page, 'S-204');
+    await selectStayDates(page, STAY.arrival, STAY.departure);
+    await page.settle();
+    await completeGuestForm(page);
+    await page.click('[data-testid="booking-submit"]');
+
+    await page.waitForSelector('[data-testid="itinerary-pass"]', { timeout: 20_000 });
+    await page.settle();
+
+    const url = await page.evaluate('return location.pathname;');
+    assertMatch(url, /^\/booking\/confirmation\/RES-[0-9A-F]{10}$/, 'checkout lands on the itinerary pass');
+
+    const reference = url.split('/').pop();
+    const stored = await page.evaluate(`
+      const raw = window.localStorage.getItem('resort-inventory-storage');
+      return JSON.parse(raw).state.reservations[0].bookingReference;
+    `);
+    assertSame(reference, stored, 'the itinerary URL matches the persisted booking reference');
+  });
+
+  testAsync('the console shell publishes its metrics top bar', async () => {
+    await freshPage();
+    await resetInventory(page);
+    await page.setViewport({ width: 1440, height: 900, mobile: false });
+    await createReservationThroughUi(page, 'V-101');
+
+    await checkPage(
+      async () => {
+        await page.goto(`${server.origin}/admin/rooms`);
+        await page.waitForSelector('[data-testid="console-metrics"]');
+      },
+      { label: 'the inventory console' },
+    );
+
+    const inventoryMetrics = await page.evaluate(`
+      return [...document.querySelectorAll('[data-testid="console-metrics"] dt')].map((node) => node.innerText.trim());
+    `);
+    assertEqual(
+      inventoryMetrics.map((label) => label.toLowerCase()),
+      ['in inventory', 'occupied tonight', 'withdrawn', 'booked value'],
+      'the inventory console publishes its occupancy figures',
+    );
+
+    await checkPage(
+      async () => {
+        await page.goto(`${server.origin}/admin/reservations`);
+        await page.waitForSelector('[data-testid="console-metrics"]');
+      },
+      { label: 'the reservation register' },
+    );
+    const registerMetrics = await page.evaluate(`
+      return [...document.querySelectorAll('[data-testid="console-metrics"] dt')].map((node) => node.innerText.trim());
+    `);
+    assertEqual(
+      registerMetrics.map((label) => label.toLowerCase()),
+      ['live itineraries', 'in house tonight', 'booked value'],
+      'the register publishes its itinerary figures',
+    );
+
+    const occupancy = await page.evaluate(`
+      const cards = [...document.querySelectorAll('[data-testid="console-metrics"] dd')];
+      return cards.map((node) => node.innerText.trim());
+    `);
+    assertSame(occupancy[0], '1', 'the suite with a live itinerary is reported as occupied tonight');
+  });
+
+  /* ------------------------------------------------------------------ */
+  suite('Phase 5 — responsive viewport sweep');
+
+  const ROUTES = [
+    { path: '/', name: 'catalogue' },
+    { path: '/rooms/the-cliffside-sanctuary', name: 'suite-detail' },
+    { path: '/admin/rooms', name: 'inventory-console' },
+    { path: '/admin/reservations', name: 'reservation-register' },
   ];
+
+  for (const viewport of VIEWPORTS) {
+    for (const route of ROUTES) {
+      testAsync(`${route.name} is free of clipping at ${viewport.label}`, async () => {
+        await checkPage(
+          async () => {
+            await page.setViewport(viewport);
+            await page.goto(`${server.origin}${route.path}`);
+            await page.waitForSelector('main, body > div');
+          },
+          { label: `${route.path} at ${viewport.label}` },
+        );
+        await page.settle(400);
+
+        const layout = await page.layoutReport();
+        assertFalse(
+          layout.horizontalOverflow,
+          `${route.path} must not scroll sideways at ${viewport.label} (scrollWidth ${layout.scrollWidth} vs ${layout.viewportWidth}); offenders: ${JSON.stringify(layout.overflowing)}`,
+        );
+
+        // 44x44 is a finger-sized target rule and only applies where the device has a
+        // finger; pointer viewports are held to the 24x24 WCAG 2.2 minimum instead.
+        const minimum = viewport.mobile ? 44 : 24;
+        const undersized = await page.touchTargetReport(minimum);
+        assertEqual(
+          undersized,
+          [],
+          `every control on ${route.path} at ${viewport.label} must be at least ${minimum}x${minimum} CSS pixels`,
+        );
+
+        await page.screenshot(
+          path.join(SCREENSHOT_DIR, `phase5-${route.name}-${viewport.width}.png`),
+        );
+      });
+    }
+  }
+
+  /* ------------------------------------------------------------------ */
+  suite('Responsive shell — Phase 1 baseline');
 
   for (const viewport of VIEWPORTS) {
     testAsync(`no horizontal overflow or clipping at ${viewport.label}`, async () => {

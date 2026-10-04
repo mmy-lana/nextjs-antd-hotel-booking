@@ -100,20 +100,18 @@ export function RoomInventoryTable({
         dataIndex: 'status',
         key: 'status',
         width: 190,
-        filters: (Object.keys(ROOM_STATUS_PRESENTATION) as RoomStatus[]).map((status) => ({
-          text: ROOM_STATUS_PRESENTATION[status].label,
-          value: status,
-        })),
-        onFilter: (value, room) => room.status === value,
+        sorter: (a, b) => a.status.localeCompare(b.status),
+        // Filtering by status is provided by the inline dropdown below, which is a
+        // finger-sized control; a header filter icon would duplicate it as a 21px dot.
         render: (status: RoomStatus, room) => (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
             <RoomStatusBadge status={status} size="sm" />
             <Select
-              size="small"
               value={status}
               aria-label={`Set status for ${room.roomNumber}`}
               data-testid={`status-select-${room.roomNumber}`}
-              style={{ width: '100%' }}
+              // A 44px control height is the minimum comfortable target on a phone.
+              style={{ width: '100%', minWidth: 132 }}
               onChange={(next: RoomStatus) => onStatusChange(room.id, next)}
               options={(Object.keys(ROOM_STATUS_PRESENTATION) as RoomStatus[]).map((value) => ({
                 value,
@@ -129,8 +127,6 @@ export function RoomInventoryTable({
         key: 'viewType',
         width: 150,
         sorter: (a, b) => a.viewType.localeCompare(b.viewType),
-        filters: [...new Set(rooms.map((room) => room.viewType))].map((view) => ({ text: view, value: view })),
-        onFilter: (value, room) => room.viewType === value,
         render: (viewType: Room['viewType']) => <span style={{ fontSize: 13 }}>{viewType}</span>,
       },
       {

@@ -664,7 +664,11 @@ export class HeadlessPage {
     `);
   }
 
-  /** Measures interactive controls that fall below the touch-target guideline. */
+  /**
+   * Measures interactive controls that fall below the touch-target guideline.
+   *
+   * @param {number} [minimum] required edge length in CSS pixels.
+   */
   touchTargetReport(minimum = 44) {
     return this.evaluate(`
       const minimum = ${Number(minimum)};
@@ -684,6 +688,7 @@ export class HeadlessPage {
           const rect = node.getBoundingClientRect();
           return {
             tag: node.tagName.toLowerCase(),
+            className: String(node.className || '').slice(0, 90),
             label: (node.innerText || node.getAttribute('aria-label') || node.getAttribute('placeholder') || '').trim().slice(0, 40),
             width: Math.round(rect.width),
             height: Math.round(rect.height),
