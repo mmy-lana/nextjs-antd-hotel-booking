@@ -33,3 +33,5 @@ pnpm-debug.log*
 next-env.d.ts
 
 repomix-output.xml
+# headless chrome verification artefacts
+/.verify-screenshots/

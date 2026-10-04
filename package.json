@@ -6,7 +6,11 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "typecheck": "tsc --noEmit",
+    "verify:domain": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --import ./scripts/verify/register-aliases.mjs ./scripts/verify/domain-suite.mjs",
+    "verify:ui": "node ./scripts/verify/ui-suite.mjs",
+    "verify": "pnpm run typecheck && pnpm run verify:domain && pnpm run verify:ui"
   },
   "dependencies": {
     "@ant-design/icons": "latest",

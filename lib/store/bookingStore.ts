@@ -1,7 +1,8 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import type { Dayjs } from 'dayjs';
-import { RoomCategory } from '@/types/booking';
+import type { RoomCategory } from '@/types/booking';
+import { STORAGE_KEYS } from '@/lib/utils/storage';
 
 interface BookingSessionState {
   dateRange: [string, string] | null;
@@ -31,7 +32,8 @@ export const useBookingStore = create<BookingSessionState>()(
       resetFilters: () => set({ dateRange: null, guests: { adults: 2, children: 0 }, selectedCategory: 'ALL' }),
     }),
     {
-      name: 'resort-search-session',
+      name: STORAGE_KEYS.bookingSession,
+      version: 0,
       skipHydration: true,
     }
   )

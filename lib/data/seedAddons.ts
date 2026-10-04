@@ -1,4 +1,4 @@
-import { AddonService } from '@/types/booking';
+import type { AddonService } from '@/types/booking';
 
 export const defaultAddons: AddonService[] = [
   {

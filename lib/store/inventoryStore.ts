@@ -1,9 +1,10 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import { Room, Reservation, AddonService } from '@/types/booking';
+import type { Room, Reservation, AddonService } from '@/types/booking';
 import { defaultRooms } from '@/lib/data/seedRooms';
 import { defaultAddons } from '@/lib/data/seedAddons';
 import { isDateRangeOverlapping } from '@/lib/utils/availability';
+import { STORAGE_KEYS } from '@/lib/utils/storage';
 
 interface InventoryState {
   rooms: Room[];
@@ -121,7 +122,8 @@ export const useInventoryStore = create<InventoryState>()(
       },
     }),
     {
-      name: 'resort-inventory-storage',
+      name: STORAGE_KEYS.inventory,
+      version: 0,
       skipHydration: true,
     }
   )

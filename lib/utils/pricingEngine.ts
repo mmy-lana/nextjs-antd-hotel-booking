@@ -1,5 +1,5 @@
 import dayjs from 'dayjs';
-import { Room, AddonService, PricingBreakdown } from '@/types/booking';
+import type { Room, AddonService, PricingBreakdown } from '@/types/booking';
 
 export function calculateReservationQuote(
   room: Pick<Room, 'basePricePerNight' | 'weekendPricePerNight' | 'resortFeePerNight' | 'cleaningFee'>,

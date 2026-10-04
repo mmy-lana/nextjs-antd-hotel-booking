@@ -1,4 +1,4 @@
-import { Room } from '@/types/booking';
+import type { Room } from '@/types/booking';
 
 export const defaultRooms: Room[] = [
   {
